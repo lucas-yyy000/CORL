@@ -118,6 +118,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+corl_env/
+
 
 # Spyder project settings
 .spyderproject
@@ -146,3 +148,7 @@ dmypy.json
 .yaml
 wandb
 assets/
+
+*.code-workspace
+offline_data/
+out/
