@@ -36,15 +36,15 @@ LOG_STD_MAX = 2.0
 class TrainConfig:
     # Experiment
     device: str = "cuda"
-    env: str = "evasion-v0"  # OpenAI gym environment name
+    env: str = "evasion-v1"  # OpenAI gym environment name
     seed: int = 0  # Sets Gym, PyTorch and Numpy seeds
     eval_freq: int = int(5e3)  # How often (time steps) we evaluate
     n_episodes: int = 10  # How many episodes run during evaluation
-    max_timesteps: int = int(500_000)  # Max time steps to run environment
+    max_timesteps: int = int(3_000_000)  # Max time steps to run environment
     checkpoints_path: str = "/home/lucas/Workspace/CORL/out"  # Save path
     load_model: str = ""  # Model load file name, "" doesn't load
     # IQL
-    buffer_size: int = 1600  # Replay buffer size
+    buffer_size: int = 933_500  # Replay buffer size
     batch_size: int = 64  # Batch size for all networks
     discount: float = 0.99  # Discount factor
     tau: float = 0.005  # Target network update rate
@@ -109,12 +109,12 @@ class ReplayBuffer:
     def __init__(
         self,
         buffer_size: int,
-        device: str = "cpu",
-        data_path = "/home/lucas/Workspace/CORL/offline_data/"
+        device: str = "cuda",
+        data_path = "/media/lucas/T7/Offline_RL_data/"
     ):
         self._buffer_size = buffer_size
-        self._pointer = 1000
-        self._size = 1000
+        # self._pointer = 2_000_000
+        # self._size = 2_000_000
 
         self._device = device
         self._data_path = data_path
@@ -123,7 +123,7 @@ class ReplayBuffer:
         return torch.tensor(data, dtype=torch.float32, device=self._device)
 
     def sample(self, batch_size: int) -> TensorBatch:
-        indices = np.random.randint(0, min(self._size, self._pointer), size=batch_size)
+        indices = np.random.randint(0, self._buffer_size, size=batch_size)
 
         states = []
         actions = []
@@ -245,15 +245,6 @@ def return_reward_range(dataset, max_episode_steps):
     lengths.append(ep_len)  # but still keep track of number of steps
     assert sum(lengths) == len(dataset["rewards"])
     return min(returns), max(returns)
-
-
-def modify_reward(dataset, env_name, max_episode_steps=1000):
-    if any(s in env_name for s in ("halfcheetah", "hopper", "walker2d")):
-        min_ret, max_ret = return_reward_range(dataset, max_episode_steps)
-        dataset["rewards"] /= max_ret - min_ret
-        dataset["rewards"] *= max_episode_steps
-    elif "antmaze" in env_name:
-        dataset["rewards"] -= 1.0
 
 
 def asymmetric_l2_loss(u: torch.Tensor, tau: float) -> torch.Tensor:
@@ -535,6 +526,7 @@ class ImplicitQLearning:
             "total_it": self.total_it,
         }
 
+
     def load_state_dict(self, state_dict: Dict[str, Any]):
         self.qf.load_state_dict(state_dict["qf"])
         self.q_optimizer.load_state_dict(state_dict["q_optimizer"])
@@ -549,6 +541,14 @@ class ImplicitQLearning:
 
         self.total_it = state_dict["total_it"]
 
+def init_weights(module: nn.Module, gain: float = 1) -> None:
+    """
+    Orthogonal initialization (used in PPO and A2C)
+    """
+    if isinstance(module, (nn.Linear, nn.Conv2d)):
+        nn.init.orthogonal_(module.weight, gain=gain)
+        if module.bias is not None:
+            module.bias.data.fill_(0.0)
 
 @pyrallis.wrap()
 def train(config: TrainConfig):
@@ -574,16 +574,19 @@ def train(config: TrainConfig):
     img_size = 100
     time_max = 100
     observation_img_size = [1, img_size, img_size]
-    action_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(1,))
+    action_space = gym.spaces.Box(low=-40.0, high=40.0, shape=(1,))
     observation_space= gym.spaces.Dict({"heat_map": gym.spaces.Box(0, 255, observation_img_size), 
-                            "goal_direction": gym.spaces.Box(-250, 250, shape=(2,)),
-                            'time_spent': gym.spaces.Discrete(time_max + 1)})
+                            "goal_direction": gym.spaces.Box(-500, 500, shape=(2,)),
+                            'time_spent': gym.spaces.Box(low=1.0, high=np.inf, shape=(1,))})
     action_dim = 1
     
     # Set up neural network modules.
     actor = ActorNet(observation_space, action_space, [64, 64]).to(config.device)
+    init_weights(actor, gain=1e-5)
     q_network = TwinQ(observation_space, action_dim).to(config.device)
+    init_weights(q_network)
     v_network = ValueFunction(observation_space).to(config.device)
+    init_weights(v_network)
 
     v_optimizer = torch.optim.Adam(v_network.parameters(), lr=config.vf_lr)
     q_optimizer = torch.optim.Adam(q_network.parameters(), lr=config.qf_lr)
@@ -653,11 +656,11 @@ def train(config: TrainConfig):
         #     wandb.log(
         #         {"d4rl_normalized_score": normalized_eval_score}, step=trainer.total_it
         #     )
-
-    if config.checkpoints_path is not None:
-        torch.save(
-            trainer.state_dict(),
-            os.path.join(config.checkpoints_path, f"checkpoint_{t}.pt"),
-        )
+        if (t + 1) % config.eval_freq == 0:
+            if config.checkpoints_path is not None:
+                torch.save(
+                    trainer.state_dict(),
+                    os.path.join(config.checkpoints_path, f"checkpoint_{t}.pt"),
+                )
 if __name__ == "__main__":
     train()

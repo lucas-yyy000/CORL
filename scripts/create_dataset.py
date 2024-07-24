@@ -4,17 +4,27 @@ import gymnasium as gym
 from utils import *
 from gymnasium.spaces import Dict, Box, Discrete
 from minari.serialization import serialize_space
-
+import statistics
 
 data_path = "/home/lucas/Workspace/Guidance for Evasion/data/"
-processed_data_path = "/home/lucas/Workspace/CORL/offline_data/"
-data_num = 50
-map_range = 475
-radar_radius = 75
+processed_data_path = "/media/lucas/T7/Offline_rl_data/"
+data_num = 100_000
+
+map_range = 1000
+radar_radius = 100
+min_num_radar=20
+max_num_radar=75
+V=30.0
+L1=50.0
+planning_delta_t = 0.5
+num_boundary_sample = 3
+bloat_radius=10
+max_iter=100
+
 img_size = 100
-aircraft_detection_range = 150
+aircraft_detection_range = 100
 grid_size=2*aircraft_detection_range/img_size
-time_max = 100
+time_max = 250
 time_interval = 0.5
 observation_img_size = [1, img_size, img_size]
 
@@ -26,8 +36,14 @@ def generate_episode_data(data):
     path = data['state_history']
     inputs = data['input_history']
     risks = data['risk_history']
-    # print(path.shape)
-    # print(len(risks))
+    # print("Episode length: ", len(inputs))
+    # print("Risks stats: ", "Min: ", min(risks), "Max: ", max(risks), 
+    #       "Mean: ", statistics.mean(risks), 
+    #       "Median: ", statistics.median(risks),
+    #       "Total: ", sum(risks))
+    # print("Inputs stats: ", "Min: ", min(inputs), "Max: ", max(inputs), 
+    #       "Mean: ", statistics.mean(inputs), 
+    #       "Median: ", statistics.median(inputs))
     observations = []
     # next_observations = []
     actions = []
@@ -43,26 +59,28 @@ def generate_episode_data(data):
         # print(heat_map.shape)
         observations.append({'heat_map': heat_map, 
                             'goal_direction': goal_location - path[i][:2],
-                            'time_spent': i})
+                            'time_spent': np.exp(i/50)})
         
         actions.append(inputs[i+1])
 
         if i >= time_max and np.linalg.norm(goal_location - path[i][:2]) > 30.0:
-            rewards.append(-risks[i] - 100)
+            rewards.append(-1000)
             truncations.append(False)
             terminations.append(True)
             break
         elif i < time_max and np.linalg.norm(goal_location - path[i][:2]) <= 30.0:
-            rewards.append(-risks[i] + 100)
+            rewards.append(1000)
             truncations.append(False)
             terminations.append(True)
             break
         elif i < time_max and np.linalg.norm(goal_location - path[i][:2]) > 30.0:
-            rewards.append(-risks[i])
+            rewards.append(-risks[i] - np.exp(i/50))
             truncations.append(False)
             terminations.append(False)
         else:
-            rewards.append(-risks[i] - (i - time_max))
+            # rewards.append(-risks[i])
+            print("Weird call...")
+            rewards.append(-risks[i] + 1.0)
             truncations.append(False)
             terminations.append(True)
             break
@@ -71,7 +89,7 @@ def generate_episode_data(data):
                                       aircraft_detection_range, grid_size, radar_radius)
     observations.append({'heat_map': heat_map, 
                     'goal_direction': goal_location - path[last_idx][:2],
-                    'time_spent': last_idx})
+                    'time_spent': np.exp(i/50)})
         
     # print(len(observations))
     # print(len(actions))
@@ -97,10 +115,9 @@ def generate_episode_data(data):
 import pickle 
 
 dataset = None
-u_min = np.inf
-u_max = -np.inf
 offline_dataset_size = 0
 for i in range(data_num):
+    print("Data: ", i)
     episode_dict = np.load(data_path + f'episode_{i}.npy',allow_pickle='TRUE').item()
     sars_data = generate_episode_data(episode_dict)
 

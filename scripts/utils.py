@@ -1,5 +1,44 @@
 import numpy as np
+import matplotlib.pyplot as plt
+import math
+from scipy.stats import qmc
+from numba import jit
 
+
+def generate_radar_config(num_radar_min, num_radar_max, separation_radius=30.0, map_range=500, radar_minimal_separatin_dist=20.0):
+    num_radars = np.random.randint(num_radar_min, high=num_radar_max)
+    '''
+    Poisson disk sampling.
+    '''
+    rng = np.random.default_rng()
+    radius = separation_radius/map_range
+    engine = qmc.PoissonDisk(d=2, radius=radius, seed=rng)
+    radar_locs = map_range*engine.random(num_radars)
+
+    radar_orientations = (2*np.pi)*(np.random.rand(num_radars))
+    valid_radar_locs = []
+    valid_radar_orientations = []
+    for i in range(radar_locs.shape[0]):
+        if np.linalg.norm(radar_locs[i, :]) > radar_minimal_separatin_dist:
+            valid_radar_locs.append(radar_locs[i, :])
+            valid_radar_orientations.append(radar_orientations[i])
+    radar_locs = np.array(valid_radar_locs)
+    radar_orientations = np.array(valid_radar_orientations)
+
+    return radar_locs, radar_orientations
+
+def visualiza_radar_config(radar_locs, radar_orientations, radius=30, xlim=None, ylim=None):
+    plt.scatter(radar_locs[:, 0], radar_locs[:, 1])
+    for i in range(radar_locs.shape[0]):
+        plt.arrow(radar_locs[i, 0], radar_locs[i, 1], 10*np.cos(radar_orientations[i]), 10*np.sin(radar_orientations[i]))
+        plt.scatter([radar_locs[i, 0] + radius*np.cos(theta) for theta in np.linspace(0, np.pi*2)], [radar_locs[i, 1] + radius*np.sin(theta) for theta in np.linspace(0, np.pi*2)], s=0.5)
+    
+    if not xlim is None:
+        plt.xlim(xlim)
+    if not ylim is None:
+        plt.ylim(ylim)
+
+@jit(nopython=True)
 def get_radar_heat_map(state, radar_locs, img_size, aircraft_detection_range, grid_size, radar_detection_range):
     '''
     state: [x, y, theta]
