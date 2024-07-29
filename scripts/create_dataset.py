@@ -5,28 +5,45 @@ from utils import *
 from gymnasium.spaces import Dict, Box, Discrete
 from minari.serialization import serialize_space
 import statistics
+import yaml
 
-data_path = "/home/lucas/Workspace/Guidance for Evasion/data/"
-processed_data_path = "/media/lucas/T7/Offline_rl_data/"
-data_num = 100_000
+data_config_path = "/home/lucas/Workspace/evasion_guidance/evasion_guidance/" + "params/data_collection.yaml"
+with open(data_config_path,"r") as file_object:
+    data_config = yaml.load(file_object,Loader=yaml.SafeLoader)
 
-map_range = 1000
-radar_radius = 100
-min_num_radar=20
-max_num_radar=75
-V=30.0
-L1=50.0
-planning_delta_t = 0.5
-num_boundary_sample = 3
-bloat_radius=10
-max_iter=100
 
-img_size = 100
-aircraft_detection_range = 100
+data_path = data_config['data_collection']['output_path']
+
+map_range = data_config['env']['map_range']
+radar_radius = data_config['env']['radar_radius']
+min_num_radar = data_config['env']['min_num_radar']
+max_num_radar = data_config['env']['max_num_radar']
+V = data_config['planner']['V']
+L1 = data_config['planner']['L1']
+time_interval = data_config['planner']['delta_t']
+
+with open("/home/lucas/Workspace/CORL/params/offline_data_config.yaml","r") as file_object:
+    offline_data_config = yaml.load(file_object,Loader=yaml.SafeLoader)
+
+processed_data_path = offline_data_config['output_path']
+data_num = offline_data_config['load_data_num']
+img_size = offline_data_config['env']['img_size']
+aircraft_detection_range = offline_data_config['env']['aircraft_detection_range']
 grid_size=2*aircraft_detection_range/img_size
-time_max = 250
-time_interval = 0.5
+time_max = offline_data_config['env']['max_time_step']
 observation_img_size = [1, img_size, img_size]
+goal_tolerance = offline_data_config['goal_tolerance']
+time_scaling = offline_data_config['env']['time_scaling']
+
+def center_goal(state, goal_location):
+    state = np.array([
+            [np.cos(state[2]), -np.sin(state[2]), state[0]],
+            [np.sin(state[2]), np.cos(state[2]), state[1]],
+            [0, 0, 1]
+        ])
+    state_inv = np.linalg.inv(state)
+    goal_hom = np.array([goal_location[0], goal_location[1], 1])
+    return np.dot(state_inv, goal_hom)[:2]
 
 def generate_episode_data(data):
     init_state = data['start_state']
@@ -36,79 +53,80 @@ def generate_episode_data(data):
     path = data['state_history']
     inputs = data['input_history']
     risks = data['risk_history']
-    # print("Episode length: ", len(inputs))
-    # print("Risks stats: ", "Min: ", min(risks), "Max: ", max(risks), 
-    #       "Mean: ", statistics.mean(risks), 
-    #       "Median: ", statistics.median(risks),
-    #       "Total: ", sum(risks))
-    # print("Inputs stats: ", "Min: ", min(inputs), "Max: ", max(inputs), 
-    #       "Mean: ", statistics.mean(inputs), 
-    #       "Median: ", statistics.median(inputs))
+
+    #############################################################
+    ###       Print some stats about the collected data       ###
+    #############################################################
+
+    print("Episode length: ", len(path))
+    print("Risks stats: ", "Min: ", min(risks), "Max: ", max(risks), 
+          "Mean: ", statistics.mean(risks), 
+          "Median: ", statistics.median(risks),
+          "Total: ", sum(risks))
+    print("Inputs stats: ", "Min: ", min(inputs), "Max: ", max(inputs), 
+          "Mean: ", statistics.mean(inputs), 
+          "Median: ", statistics.median(inputs))
+
+    #############################################################
+    ###                   Process Data                        ###
+    #############################################################
+
     observations = []
-    # next_observations = []
+    next_observations = []
     actions = []
     rewards = []
     terminations = []
     truncations = []
-    last_idx = 0
     sars_data = []
-    for i in range(len(inputs)-1):
-        last_idx += 1
+    for i in range(len(path)-1):
         heat_map = get_radar_heat_map(path[i], radar_locs, img_size, 
                                  aircraft_detection_range, grid_size, radar_radius)
-        # print(heat_map.shape)
         observations.append({'heat_map': heat_map, 
-                            'goal_direction': goal_location - path[i][:2],
-                            'time_spent': np.exp(i/50)})
+                            'goal_direction': center_goal(path[i], goal_location),
+                            'time_spent': np.exp(i/time_scaling)})
         
-        actions.append(inputs[i+1])
+        heat_map_next = get_radar_heat_map(path[i+1], radar_locs, img_size, 
+                                 aircraft_detection_range, grid_size, radar_radius)
+        next_observations.append({'heat_map': heat_map_next, 
+                            'goal_direction': center_goal(path[i+1], goal_location),
+                            'time_spent': np.exp((i+1)/time_scaling)})
 
-        if i >= time_max and np.linalg.norm(goal_location - path[i][:2]) > 30.0:
-            rewards.append(-1000)
+        actions.append(inputs[i])
+        dist_to_goal = np.linalg.norm(goal_location - path[i][:2])
+        if i >= time_max and dist_to_goal > goal_tolerance:
+            rewards.append(offline_data_config['time_limit_penalty'])
             truncations.append(False)
             terminations.append(True)
             break
-        elif i < time_max and np.linalg.norm(goal_location - path[i][:2]) <= 30.0:
-            rewards.append(1000)
+        elif i < time_max and dist_to_goal <= goal_tolerance:
+            rewards.append(offline_data_config['goal_reward'])
             truncations.append(False)
             terminations.append(True)
+            print("Breaking...")
             break
-        elif i < time_max and np.linalg.norm(goal_location - path[i][:2]) > 30.0:
-            rewards.append(-risks[i] - np.exp(i/50))
+        elif i < time_max and dist_to_goal > goal_tolerance:
+            rewards.append(-risks[i] - np.exp(i/time_scaling) + 1 / ( dist_to_goal  + 1e-3 ) )
             truncations.append(False)
             terminations.append(False)
         else:
-            # rewards.append(-risks[i])
+            ### This part shouldn't be called.
             print("Weird call...")
-            rewards.append(-risks[i] + 1.0)
+            rewards.append(-np.inf)
             truncations.append(False)
             terminations.append(True)
             break
-
-    heat_map = get_radar_heat_map(path[last_idx], radar_locs, img_size, 
-                                      aircraft_detection_range, grid_size, radar_radius)
-    observations.append({'heat_map': heat_map, 
-                    'goal_direction': goal_location - path[last_idx][:2],
-                    'time_spent': np.exp(i/50)})
         
     # print(len(observations))
     # print(len(actions))
     # print(len(rewards))
     # print(len(terminations))
     # print(len(truncations))
-    for i in range(len(actions)):
+    for i in range(len(observations)):
         sars_data.append({'observation': observations[i],
-                          'next_observation': observations[i+1],
+                          'next_observation': next_observations[i],
                           'action': actions[i],
                           'reward': rewards[i],
                           'termination': terminations[i]})
-        
-    # episode_data = {'observations': observations,
-    #                 'next_observations':  next_observations,
-    #                 'actions': np.asarray(actions), 
-    #                 'rewards': np.asarray(rewards), 
-    #                 'terminations': np.asarray(terminations), 
-    #                 'truncations': np.asarray(truncations)}
 
     return sars_data
 
@@ -141,3 +159,6 @@ for i in range(data_num):
     # else:
     #     dataset.update_dataset_from_buffer([episode_data])
 
+### Save the config
+with open(offline_data_config['output_path'] + 'config.yml', 'w') as outfile:
+    yaml.dump(offline_data_config, outfile)

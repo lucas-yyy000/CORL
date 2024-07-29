@@ -152,3 +152,4 @@ assets/
 *.code-workspace
 offline_data/
 out/
+data/

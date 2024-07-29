@@ -21,7 +21,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 
 import pickle
 from tensordict import MemoryMappedTensor, TensorDict
-from actor_utils import *
+from actor_utils import FeatureExtractor, DiagGaussianDistribution
 # from gymnasium.spaces import Dict, Box, Discrete
 
 TensorBatch = List[torch.Tensor]
@@ -40,12 +40,12 @@ class TrainConfig:
     seed: int = 0  # Sets Gym, PyTorch and Numpy seeds
     eval_freq: int = int(5e3)  # How often (time steps) we evaluate
     n_episodes: int = 10  # How many episodes run during evaluation
-    max_timesteps: int = int(3_000_000)  # Max time steps to run environment
-    checkpoints_path: str = "/home/lucas/Workspace/CORL/out"  # Save path
+    max_timesteps: int = int(5_000_000)  # Max time steps to run environment
+    checkpoints_path: str = "/home/yixuany/workspace/CORL/output"  # Save path
     load_model: str = ""  # Model load file name, "" doesn't load
     # IQL
-    buffer_size: int = 933_500  # Replay buffer size
-    batch_size: int = 64  # Batch size for all networks
+    buffer_size: int = 50*4500  # Replay buffer size
+    batch_size: int = 128  # Batch size for all networks
     discount: float = 0.99  # Discount factor
     tau: float = 0.005  # Target network update rate
     beta: float = 3.0  # Inverse temperature. Small beta -> BC, big beta -> maximizing Q
@@ -110,11 +110,9 @@ class ReplayBuffer:
         self,
         buffer_size: int,
         device: str = "cuda",
-        data_path = "/media/lucas/T7/Offline_RL_data/"
+        data_path = "/home/yixuany/workspace/CORL/offline_data/"
     ):
         self._buffer_size = buffer_size
-        # self._pointer = 2_000_000
-        # self._size = 2_000_000
 
         self._device = device
         self._data_path = data_path
@@ -168,15 +166,15 @@ class ReplayBuffer:
 
         for i in range(batch_size):
             states_tensor[i] = TensorDict({"heat_map": states[i]['heat_map'], 
-                                           "goal_direction": states[i]['goal_direction'],
+                                           "goal_direction": states[i]['goal_direction'] / 500.0,
                                            'time_spent': states[i]['time_spent']}, [])
             
             next_states_tensor[i] = TensorDict({"heat_map": next_states[i]['heat_map'], 
-                                           "goal_direction": next_states[i]['goal_direction'],
+                                           "goal_direction": next_states[i]['goal_direction'] / 500.0,
                                            'time_spent': next_states[i]['time_spent']}, [])
             
         # states = 
-        actions = self._to_tensor(torch.from_numpy(np.asarray(actions))).unsqueeze(dim=-1)
+        actions = self._to_tensor(torch.from_numpy(np.asarray(actions) / 40.0)).unsqueeze(dim=-1)
         rewards = self._to_tensor(torch.from_numpy(np.asarray(rewards)))
         dones = self._to_tensor(torch.from_numpy(np.asarray(dones)))
 
@@ -188,18 +186,6 @@ class ReplayBuffer:
         raise NotImplementedError
 
 
-def set_seed(
-    seed: int, env: Optional[gym.Env] = None, deterministic_torch: bool = False
-):
-    if env is not None:
-        env.seed(seed)
-        env.action_space.seed(seed)
-    os.environ["PYTHONHASHSEED"] = str(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    torch.manual_seed(seed)
-    torch.use_deterministic_algorithms(deterministic_torch)
-
 
 def wandb_init(config: dict) -> None:
     wandb.init(
@@ -210,26 +196,6 @@ def wandb_init(config: dict) -> None:
         id=str(uuid.uuid4()),
     )
     wandb.run.save()
-
-
-@torch.no_grad()
-def eval_actor(
-    env: gym.Env, actor: nn.Module, device: str, n_episodes: int, seed: int
-) -> np.ndarray:
-    env.seed(seed)
-    actor.eval()
-    episode_rewards = []
-    for _ in range(n_episodes):
-        state, done = env.reset(), False
-        episode_reward = 0.0
-        while not done:
-            action = actor.act(state, device)
-            state, reward, done, _ = env.step(action)
-            episode_reward += reward
-        episode_rewards.append(episode_reward)
-
-    actor.train()
-    return np.asarray(episode_rewards)
 
 
 def return_reward_range(dataset, max_episode_steps):
@@ -295,68 +261,42 @@ class MLP(nn.Module):
         return self.net(x)
 
 
-class GaussianPolicy(nn.Module):
-    def __init__(
-        self,
-        state_dim: int,
-        act_dim: int,
-        max_action: float,
-        hidden_dim: int = 256,
-        n_hidden: int = 2,
-        dropout: Optional[float] = None,
-    ):
+
+class ActorNet(nn.Module):
+    def __init__(self,
+                 observation_space,
+                 action_space,
+                 hidden_sizes,
+                 hidden_act=nn.ReLU):
         super().__init__()
-        self.net = MLP(
-            [state_dim, *([hidden_dim] * n_hidden), act_dim],
-            output_activation_fn=nn.Tanh,
-        )
-        self.log_std = nn.Parameter(torch.zeros(act_dim, dtype=torch.float32))
-        self.max_action = max_action
+        if not isinstance(hidden_sizes, list):
+            raise TypeError('hidden_sizes should be a list')
+        self.action_space = action_space
+        action_dim = action_space.shape[0]
+        self.feature_extractor = FeatureExtractor(observation_space)
+        in_size = self.feature_extractor.features_dim
+        mlp_extractor : List[nn.Module] = []
+        for curr_layer_dim in hidden_sizes:
+            mlp_extractor.append(nn.Linear(in_size, curr_layer_dim))
+            mlp_extractor.append(hidden_act())
+            in_size = curr_layer_dim
 
-    def forward(self, obs: torch.Tensor) -> Normal:
-        mean = self.net(obs)
-        std = torch.exp(self.log_std.clamp(LOG_STD_MIN, LOG_STD_MAX))
-        return Normal(mean, std)
+        self.latent_dim = in_size
+        self.policy_net = nn.Sequential(*mlp_extractor)
+        self.act_dist = DiagGaussianDistribution(action_dim)
+        self.action_net, self.log_std = self.act_dist.proba_distribution_net(self.latent_dim)
 
-    @torch.no_grad()
-    def act(self, state: np.ndarray, device: str = "cpu"):
-        state = torch.tensor(state.reshape(1, -1), device=device, dtype=torch.float32)
-        dist = self(state)
-        action = dist.mean if not self.training else dist.sample()
-        action = torch.clamp(self.max_action * action, -self.max_action, self.max_action)
-        return action.cpu().data.numpy().flatten()
+    def forward(self, observations, deterministic=False):
+        feature = self.feature_extractor(observations)
+        latent = self.policy_net.forward(feature)
+        mean_action = self.action_net.forward(latent)
+        distribution = self.act_dist.proba_distribution(mean_action, self.log_std)
+        actions = distribution.get_actions(deterministic=deterministic)
+        # log_prob = distribution.log_prob(actions)
+        actions = actions.reshape((-1, *self.action_space.shape)) 
 
-
-class DeterministicPolicy(nn.Module):
-    def __init__(
-        self,
-        state_dim: int,
-        act_dim: int,
-        max_action: float,
-        hidden_dim: int = 256,
-        n_hidden: int = 2,
-        dropout: Optional[float] = None,
-    ):
-        super().__init__()
-        self.net = MLP(
-            [state_dim, *([hidden_dim] * n_hidden), act_dim],
-            output_activation_fn=nn.Tanh,
-            dropout=dropout,
-        )
-        self.max_action = max_action
-
-    def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        return self.net(obs)
-
-    @torch.no_grad()
-    def act(self, state: np.ndarray, device: str = "cpu"):
-        state = torch.tensor(state.reshape(1, -1), device=device, dtype=torch.float32)
-        return (
-            torch.clamp(self(state) * self.max_action, -self.max_action, self.max_action)
-            .cpu()
-            .data.numpy()
-            .flatten()
-        )
+        return actions, distribution
+    
 
 
 class TwinQ(nn.Module):
@@ -469,7 +409,7 @@ class ImplicitQLearning:
         log_dict: Dict,
     ):
         exp_adv = torch.exp(self.beta * adv.detach()).clamp(max=EXP_ADV_MAX)
-        _, policy_out = self.actor(observations)
+        policy_out, _ = self.actor(observations)
         if isinstance(policy_out, torch.distributions.Distribution):
             bc_losses = -policy_out.log_prob(actions).sum(-1, keepdim=False)
         elif torch.is_tensor(policy_out):
@@ -572,16 +512,15 @@ def train(config: TrainConfig):
 
     # Set environment parameters.
     img_size = 100
-    time_max = 100
     observation_img_size = [1, img_size, img_size]
-    action_space = gym.spaces.Box(low=-40.0, high=40.0, shape=(1,))
+    action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(1,))
     observation_space= gym.spaces.Dict({"heat_map": gym.spaces.Box(0, 255, observation_img_size), 
-                            "goal_direction": gym.spaces.Box(-500, 500, shape=(2,)),
+                            "goal_direction": gym.spaces.Box(-1, 1, shape=(2,)),
                             'time_spent': gym.spaces.Box(low=1.0, high=np.inf, shape=(1,))})
     action_dim = 1
     
     # Set up neural network modules.
-    actor = ActorNet(observation_space, action_space, [64, 64]).to(config.device)
+    actor = ActorNet(observation_space, action_space, [64, 64], hidden_act=nn.Tanh).to(config.device)
     init_weights(actor, gain=1e-5)
     q_network = TwinQ(observation_space, action_dim).to(config.device)
     init_weights(q_network)
@@ -657,6 +596,7 @@ def train(config: TrainConfig):
         #         {"d4rl_normalized_score": normalized_eval_score}, step=trainer.total_it
         #     )
         if (t + 1) % config.eval_freq == 0:
+            print("Iter: ", t)
             if config.checkpoints_path is not None:
                 torch.save(
                     trainer.state_dict(),
