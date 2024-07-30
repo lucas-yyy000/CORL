@@ -1,5 +1,5 @@
 env:
-  img_size: 100
+  img_size: 200
   aircraft_detection_range: 100
   max_time_step: 100
   time_scaling: 25
