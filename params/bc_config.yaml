@@ -12,7 +12,7 @@ train:
   discount: 0.99
   eval_freq: 50000
   load_model: ''
-  max_timesteps: 1_000_000
+  max_timesteps: 5_000_000
 
 
 policy:
@@ -26,7 +26,7 @@ env:
   delta_t: 0.5
   radar_radius: 100
   aircraft_detection_range: 100
-  img_size: 100
+  img_size: 200
   action_dim: 1
   action_normalized: True  #### If true, actions are normalized to [-1, 1]
   action_min: -36.0

@@ -15,7 +15,7 @@ import wandb
 import argparse
 import yaml
 import pickle
-from actor_utils import *
+# from actor_utils import *
 from tensordict import MemoryMappedTensor, TensorDict
 
 TensorBatch = List[torch.Tensor]
@@ -62,42 +62,66 @@ class ReplayBuffer:
                 next_states.append(loaded_dict['next_observation'])
                 dones.append(loaded_dict['termination'])
 
-        states_tensor = TensorDict(
-        {
-            "heat_map": MemoryMappedTensor.empty(
-                (len(states), *states[0]['heat_map'].shape),
-                dtype=torch.float32,
-            ),
-            "goal_direction": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
-            'time_spent':  MemoryMappedTensor.empty((len(states), 1), dtype=torch.float32) 
-        },
-            batch_size=[batch_size],
-            device=self._device,
-        )
+        # states_tensor = TensorDict(
+        # {
+        #     "heat_map": MemoryMappedTensor.empty(
+        #         (len(states), *states[0]['heat_map'].shape),
+        #         dtype=torch.float32,
+        #     ),
+        #     "goal_direction": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32)
+        #     # 'time_spent':  MemoryMappedTensor.empty((len(states), 1), dtype=torch.float32) 
+        # },
+        #     batch_size=[batch_size],
+        #     device=self._device,
+        # )
 
-        next_states_tensor = TensorDict(
-        {
-            "heat_map": MemoryMappedTensor.empty(
-                (len(states), *next_states[0]['heat_map'].shape),
-                dtype=torch.float32,
-            ),
-            "goal_direction": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
-            'time_spent':  MemoryMappedTensor.empty((len(states), 1), dtype=torch.float32) 
-        },
-            batch_size=[batch_size],
-            device=self._device,
-        )
+        # next_states_tensor = TensorDict(
+        # {
+        #     "heat_map": MemoryMappedTensor.empty(
+        #         (len(states), *next_states[0]['heat_map'].shape),
+        #         dtype=torch.float32,
+        #     ),
+        #     "goal_direction": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32)
+        #     # 'time_spent':  MemoryMappedTensor.empty((len(states), 1), dtype=torch.float32) 
+        # },
+        #     batch_size=[batch_size],
+        #     device=self._device,
+        # )
 
-        for i in range(batch_size):
-            states_tensor[i] = TensorDict({"heat_map": states[i]['heat_map'], 
-                                           "goal_direction": states[i]['goal_direction'] / self._scaling,
-                                           'time_spent': states[i]['time_spent']}, [])
+        # for i in range(batch_size):
+        #     states_tensor[i] = TensorDict({"heat_map": states[i]['heat_map'], 
+        #                                    "goal_direction": states[i]['goal_direction'] / self._scaling}, [])
             
-            next_states_tensor[i] = TensorDict({"heat_map": next_states[i]['heat_map'], 
-                                           "goal_direction": next_states[i]['goal_direction'] / self._scaling,
-                                           'time_spent': next_states[i]['time_spent']}, [])
+        #     next_states_tensor[i] = TensorDict({"heat_map": next_states[i]['heat_map'], 
+        #                                    "goal_direction": next_states[i]['goal_direction'] / self._scaling}, [])
+            # states_tensor[i] = TensorDict({"heat_map": states[i]['heat_map'], 
+            #                                "goal_direction": states[i]['goal_direction'] / self._scaling,
+            #                                'time_spent': states[i]['time_spent']}, [])
+            
+            # next_states_tensor[i] = TensorDict({"heat_map": next_states[i]['heat_map'], 
+            #                                "goal_direction": next_states[i]['goal_direction'] / self._scaling,
+            #                                'time_spent': next_states[i]['time_spent']}, [])
             
         # states = 
+        observations = []
+        next_observations = []
+        for i in range(batch_size):
+            state = states[i]
+            state[0] /= self._scaling
+            state[1] /= self._scaling
+            state[3] /= self._scaling
+            state[4] /= self._scaling
+            observations.append(state)
+
+            next_state = next_states[i]
+            next_state[0] /= self._scaling
+            next_state[1] /= self._scaling
+            next_state[3] /= self._scaling
+            next_state[4] /= self._scaling
+            next_observations.append(next_state)
+
+        observations = self._to_tensor(torch.from_numpy(np.asarray(observations)))
+        next_observations = self._to_tensor(torch.from_numpy(np.asarray(next_observations)))
         if self._action_normalized:
             if self._action_dim == 1:
                 actions = self._to_tensor(torch.from_numpy(np.asarray(actions) / self._action_scale)).unsqueeze(dim=-1)
@@ -108,7 +132,7 @@ class ReplayBuffer:
         rewards = self._to_tensor(torch.from_numpy(np.asarray(rewards)))
         dones = self._to_tensor(torch.from_numpy(np.asarray(dones)))
 
-        return [states_tensor, actions, rewards, next_states_tensor, dones]
+        return [observations, actions, rewards, next_observations, dones]
 
     def add_transition(self):
         # Use this method to add new data into the replay buffer during fine-tuning.
@@ -127,7 +151,43 @@ def wandb_init(config: dict) -> None:
     )
     wandb.run.save()
 
+class ActorNet(nn.Module):
+    def __init__(self,
+                 observation_space,
+                 action_space,
+                 hidden_sizes,
+                 hidden_act=nn.ReLU):
+        super().__init__()
+        if not isinstance(hidden_sizes, list):
+            raise TypeError('hidden_sizes should be a list')
+        self.action_space = action_space
+        action_dim = action_space.shape[0]
+        in_size = observation_space.shape[0]
+        mlp_extractor : List[nn.Module] = []
+        for curr_layer_dim in hidden_sizes:
+            mlp_extractor.append(nn.Linear(in_size, curr_layer_dim))
+            mlp_extractor.append(hidden_act())
+            in_size = curr_layer_dim
 
+        mlp_extractor.append(nn.Linear(in_size, action_dim))
+        mlp_extractor.append(nn.Tanh())
+        # self.latent_dim = in_size
+        self.policy_net = nn.Sequential(*mlp_extractor)
+        # self.act_dist = DiagGaussianDistribution(action_dim)
+        # self.action_net, self.log_std = self.act_dist.proba_distribution_net(self.latent_dim)
+
+    def forward(self, observations, deterministic=False):
+        # feature = self.feature_extractor(observations)
+        # latent = self.policy_net.forward(feature)
+        # mean_action = self.action_net.forward(latent)
+        # distribution = self.act_dist.proba_distribution(mean_action, self.log_std)
+        # actions = distribution.get_actions(deterministic=deterministic)
+        # # log_prob = distribution.log_prob(actions)
+        # actions = actions.reshape((-1, *self.action_space.shape)) 
+        actions = self.policy_net(observations)
+
+        return actions, None
+    
 
 class BC:
     def __init__(
@@ -218,9 +278,12 @@ def train(config):
         device
     )
 
-    observation_space= gym.spaces.Dict({"heat_map": gym.spaces.Box(0, 255, observation_img_size), 
-                            "goal_direction": gym.spaces.Box(-1, 1, shape=(2,)),
-                            'time_spent': gym.spaces.Box(low=1.0, high=np.inf, shape=(1,))})
+    # observation_space= gym.spaces.Dict({"heat_map": gym.spaces.Box(0, 255, observation_img_size), 
+    #                         "goal_direction": gym.spaces.Box(-1, 1, shape=(2,)),
+    #                         'time_spent': gym.spaces.Box(low=1.0, high=np.inf, shape=(1,))})
+    # observation_space= gym.spaces.Dict({"heat_map": gym.spaces.Box(0, 255, observation_img_size), 
+    #                         "goal_direction": gym.spaces.Box(-1, 1, shape=(2,))})
+    observation_space = gym.spaces.Box(-1, 1, shape=(5,))
 
     assert config['policy']['hidden_act'] == 'Tanh' or config['policy']['hidden_act'] == 'ReLU', "Currently only support ReLU or Tanh."
     if config['policy']['hidden_act'] == 'Tanh':

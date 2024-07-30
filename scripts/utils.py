@@ -77,3 +77,16 @@ def get_radar_heat_map(state, radar_locs, img_size, aircraft_detection_range, gr
     formatted = formatted[np.newaxis, :, :]
 
     return formatted
+
+def center_state(state_inert, loc):
+    '''
+    Canter loc with respect to state_inert.
+    '''
+    mat = np.array([
+            [np.cos(state_inert[2]), -np.sin(state_inert[2]), state_inert[0]],
+            [np.sin(state_inert[2]), np.cos(state_inert[2]), state_inert[1]],
+            [0, 0, 1]
+        ])
+    mat_inv = np.linalg.inv(mat)
+    loc_hom = np.array([loc[0], loc[1], 1])
+    return np.dot(mat_inv, loc_hom)[:2]

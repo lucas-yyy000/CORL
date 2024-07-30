@@ -35,16 +35,6 @@ observation_img_size = [1, img_size, img_size]
 goal_tolerance = offline_data_config['goal_tolerance']
 time_scaling = offline_data_config['env']['time_scaling']
 
-def center_goal(state, goal_location):
-    state = np.array([
-            [np.cos(state[2]), -np.sin(state[2]), state[0]],
-            [np.sin(state[2]), np.cos(state[2]), state[1]],
-            [0, 0, 1]
-        ])
-    state_inv = np.linalg.inv(state)
-    goal_hom = np.array([goal_location[0], goal_location[1], 1])
-    return np.dot(state_inv, goal_hom)[:2]
-
 def generate_episode_data(data):
     init_state = data['start_state']
     goal_location = data['goal_location']
@@ -79,18 +69,27 @@ def generate_episode_data(data):
     truncations = []
     sars_data = []
     for i in range(len(path)-1):
-        heat_map = get_radar_heat_map(path[i], radar_locs, img_size, 
-                                 aircraft_detection_range, grid_size, radar_radius)
-        observations.append({'heat_map': heat_map, 
-                            'goal_direction': center_goal(path[i], goal_location),
-                            'time_spent': np.exp(i/time_scaling)})
+        # heat_map = get_radar_heat_map(path[i], radar_locs, img_size, 
+        #                          aircraft_detection_range, grid_size, radar_radius)
+        # observations.append({'heat_map': heat_map, 
+        #                     'goal_direction': center_state(path[i], goal_location),
+        #                     'time_spent': np.exp(i/time_scaling)})
         
-        heat_map_next = get_radar_heat_map(path[i+1], radar_locs, img_size, 
-                                 aircraft_detection_range, grid_size, radar_radius)
-        next_observations.append({'heat_map': heat_map_next, 
-                            'goal_direction': center_goal(path[i+1], goal_location),
-                            'time_spent': np.exp((i+1)/time_scaling)})
-
+        # heat_map_next = get_radar_heat_map(path[i+1], radar_locs, img_size, 
+        #                          aircraft_detection_range, grid_size, radar_radius)
+        # next_observations.append({'heat_map': heat_map_next, 
+        #                     'goal_direction': center_state(path[i+1], goal_location),
+        #                     'time_spent': np.exp((i+1)/time_scaling)})
+        # print(path[i])
+        # print(goal_location)
+        # print(path[i].extend(list(goal_location)))
+        state = [path[i][0], path[i][1], path[i][2], goal_location[0], goal_location[1]]
+        # print(state)
+        observations.append(state)
+        # print("State: ", observations[-1]['state'])
+        next_state = [path[i+1][0], path[i+1][1], path[i+1][2], goal_location[0], goal_location[1]]
+        next_observations.append(next_state)
+        
         actions.append(inputs[i])
         dist_to_goal = np.linalg.norm(goal_location - path[i][:2])
         if i >= time_max and dist_to_goal > goal_tolerance:
