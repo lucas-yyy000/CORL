@@ -158,3 +158,4 @@ data_heatmaps/
 *.zip
 *.png
 output/
+data_no_heat_map/

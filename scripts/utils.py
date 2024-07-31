@@ -39,7 +39,7 @@ def visualiza_radar_config(radar_locs, radar_orientations, radius=30, xlim=None,
         plt.ylim(ylim)
 
 @jit(nopython=True)
-def get_radar_heat_map(state, radar_locs, img_size, aircraft_detection_range, grid_size, radar_detection_range):
+def get_radar_heat_map(state, radar_locs, img_size, aircraft_detection_range, grid_size):
     '''
     state: [x, y, theta]
     '''

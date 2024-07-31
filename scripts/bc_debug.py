@@ -15,7 +15,11 @@ import wandb
 import argparse
 import yaml
 import pickle
+<<<<<<< Updated upstream
 from actor_utils import FeatureExtractor, ActorNet
+=======
+from actor_utils import DiagGaussianDistribution, ActorNet
+>>>>>>> Stashed changes
 from tensordict import MemoryMappedTensor, TensorDict
 
 TensorBatch = List[torch.Tensor]
@@ -101,7 +105,31 @@ class ReplayBuffer:
             # next_states_tensor[i] = TensorDict({"heat_map": next_states[i]['heat_map'], 
             #                                "goal_direction": next_states[i]['goal_direction'] / self._scaling,
             #                                'time_spent': next_states[i]['time_spent']}, [])
+<<<<<<< Updated upstream
 
+=======
+            
+        # states = 
+        # observations = []
+        # next_observations = []
+        # for i in range(batch_size):
+        #     state = states[i]
+        #     state[0] /= self._scaling
+        #     state[1] /= self._scaling
+        #     state[3] /= self._scaling
+        #     state[4] /= self._scaling
+        #     observations.append(state)
+
+        #     next_state = next_states[i]
+        #     next_state[0] /= self._scaling
+        #     next_state[1] /= self._scaling
+        #     next_state[3] /= self._scaling
+        #     next_state[4] /= self._scaling
+        #     next_observations.append(next_state)
+
+        # observations = self._to_tensor(torch.from_numpy(np.asarray(observations)))
+        # next_observations = self._to_tensor(torch.from_numpy(np.asarray(next_observations)))
+>>>>>>> Stashed changes
         if self._action_normalized:
             if self._action_dim == 1:
                 actions = self._to_tensor(torch.from_numpy(np.asarray(actions) / self._action_scale)).unsqueeze(dim=-1)
@@ -131,7 +159,10 @@ def wandb_init(config: dict) -> None:
     )
     wandb.run.save()
 
+<<<<<<< Updated upstream
     
+=======
+>>>>>>> Stashed changes
 # class ActorNet(nn.Module):
 #     def __init__(self,
 #                  observation_space,
@@ -143,14 +174,19 @@ def wandb_init(config: dict) -> None:
 #             raise TypeError('hidden_sizes should be a list')
 #         self.action_space = action_space
 #         action_dim = action_space.shape[0]
+<<<<<<< Updated upstream
 #         self.feature_extractor = FeatureExtractor(observation_space)
 #         in_size = self.feature_extractor.features_dim
+=======
+#         in_size = observation_space.shape[0]
+>>>>>>> Stashed changes
 #         mlp_extractor : List[nn.Module] = []
 #         for curr_layer_dim in hidden_sizes:
 #             mlp_extractor.append(nn.Linear(in_size, curr_layer_dim))
 #             mlp_extractor.append(hidden_act())
 #             in_size = curr_layer_dim
 
+<<<<<<< Updated upstream
 #         self.latent_dim = in_size
 #         mlp_extractor.append(nn.Linear(self.latent_dim, action_dim))
 #         mlp_extractor.append(nn.Tanh())
@@ -162,6 +198,28 @@ def wandb_init(config: dict) -> None:
 #         actions = self.policy_net.forward(feature)
 
 #         return actions
+=======
+#         # mlp_extractor.append(nn.Linear(in_size, action_dim))
+#         # mlp_extractor.append(nn.Tanh())
+#         # # self.latent_dim = in_size
+#         self.policy_net = nn.Sequential(*mlp_extractor)
+#         self.act_dist = DiagGaussianDistribution(action_dim)
+#         self.action_net, self.log_std = self.act_dist.proba_distribution_net(in_size)
+
+#     def forward(self, observations, deterministic=False):
+#         # feature = self.feature_extractor(observations)
+#         # latent = self.policy_net.forward(feature)
+#         # mean_action = self.action_net.forward(latent)
+#         # distribution = self.act_dist.proba_distribution(mean_action, self.log_std)
+#         # actions = distribution.get_actions(deterministic=deterministic)
+#         # # log_prob = distribution.log_prob(actions)
+#         # actions = actions.reshape((-1, *self.action_space.shape)) 
+#         mean_action = self.policy_net(observations)
+#         distribution = self.act_dist.proba_distribution(mean_action, self.log_std)
+#         actions = distribution.get_actions(deterministic=deterministic)
+
+#         return actions, distribution
+>>>>>>> Stashed changes
     
 
 class BC:
@@ -179,11 +237,39 @@ class BC:
         self.total_it = 0
         self.device = device
 
+<<<<<<< Updated upstream
     def train(self, batch) -> Dict[str, float]:
+=======
+    # def train(self, batch: TensorBatch) -> Dict[str, float]:
+    #     log_dict = {}
+    #     self.total_it += 1
+
+    #     state, action, _, _, _ = batch
+
+    #     pi, dist = self.actor(state)
+    #     actor_loss = 0
+    #     for i in range(pi.shape[0]):
+    #         actor_loss += - torch.exp( -(pi[i, 0] - action[i])**2 )*dist.log_prob(pi)[0] - torch.exp( -(pi[i, 1] - action[i])**2 )*dist.log_prob(pi)[1]
+    #     actor_loss /= pi.shape[0]
+
+    #     # # Compute actor loss
+    #     # pi, _ = self.actor(state)
+    #     # actor_loss = F.mse_loss(pi, action)
+    #     log_dict["actor_loss"] = actor_loss.item()
+    #     # Optimize the actor
+    #     self.actor_optimizer.zero_grad()
+    #     actor_loss.backward()
+    #     self.actor_optimizer.step()
+
+    #     return log_dict
+
+    def train(self, batch: TensorBatch) -> Dict[str, float]:
+>>>>>>> Stashed changes
         log_dict = {}
         self.total_it += 1
 
         state, action, _, _, _ = batch
+<<<<<<< Updated upstream
         batch_size = len(state)
         # print("Batch Size: ", batch_size)
         if batch_size < 1:
@@ -201,6 +287,28 @@ class BC:
 
         if batch_size > 0:
             actor_loss /= batch_size
+=======
+
+
+        # Compute actor loss
+        pi, dist = self.actor(state)
+
+        actor_loss = 0
+        log_prob = dist.distribution.log_prob(pi)
+        # print("Log Probability shape: ", log_prob.shape)
+        prob = torch.exp(log_prob)
+        # print("Probability shape: ", prob.shape)
+        # total_w = 0
+        for i in range(pi.shape[0]):
+            w1 = prob[i, 0]*torch.exp( -(pi[i, 0] - action[i])**2 )
+            w2 = prob[i, 1]*torch.exp( -(pi[i, 1] - action[i])**2 )
+            w = 0.5*(w1 + w2 + 1e-6)
+            actor_loss += - (w1 / w)*log_prob[i, 0] - (w2 / w)*log_prob[i, 1]
+
+        if pi.shape[0] == 0:
+            print("Actions have suspicious shape: ", pi.shape)
+        actor_loss /= pi.shape[0]
+>>>>>>> Stashed changes
         log_dict["actor_loss"] = actor_loss.item()
         # Optimize the actor
         self.actor_optimizer.zero_grad()
@@ -208,7 +316,7 @@ class BC:
         self.actor_optimizer.step()
 
         return log_dict
-
+    
     def state_dict(self) -> Dict[str, Any]:
         return {
             "actor": self.actor.state_dict(),
@@ -268,6 +376,12 @@ def train(config):
         device
     )
 
+<<<<<<< Updated upstream
+=======
+    # observation_space= gym.spaces.Dict({"heat_map": gym.spaces.Box(0, 255, observation_img_size), 
+    #                         "goal_direction": gym.spaces.Box(-1, 1, shape=(2,)),
+    #                         'time_spent': gym.spaces.Box(low=1.0, high=np.inf, shape=(1,))})
+>>>>>>> Stashed changes
     observation_space= gym.spaces.Dict({"heat_map": gym.spaces.Box(0, 255, observation_img_size), 
                             "goal_direction": gym.spaces.Box(-1, 1, shape=(2,))})
     # observation_space = gym.spaces.Box(-1, 1, shape=(5,))
@@ -277,7 +391,10 @@ def train(config):
         actor = ActorNet(observation_space, action_space, config['policy']['actor_net_hidden'], hidden_act=nn.Tanh).to(device)
     if config['policy']['hidden_act'] == 'ReLU':
         actor = ActorNet(observation_space, action_space, config['policy']['actor_net_hidden'], hidden_act=nn.ReLU).to(device)
+<<<<<<< Updated upstream
     
+=======
+>>>>>>> Stashed changes
     load_model_from = config['train']['load_model']
     if load_model_from == '':
         init_weights(actor)
