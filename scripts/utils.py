@@ -62,7 +62,7 @@ def get_radar_heat_map(state, radar_locs, img_size, aircraft_detection_range, gr
 
             for i in range(-int(img_size/2), int(img_size/2)):
                 for j in range(-int(img_size/2), int(img_size/2)):
-                    radars_encoding[int(i + img_size/2), int(j + img_size/2)] += np.exp(( -(x_grid - i)**2 / (radar_detection_range / 5.0)**2 - (y_grid - j)**2 / (2*radar_detection_range / 5.0)**2 ))*1e3
+                    radars_encoding[int(i + img_size/2), int(j + img_size/2)] += np.exp(( -(x_grid - i)**2 / (10.0)**2 - (y_grid - j)**2 / (10.0)**2 ))*1e3
 
     ### Transpose so that x <---> row, y <---> column
     radars_encoding = radars_encoding.T

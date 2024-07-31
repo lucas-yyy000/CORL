@@ -1,18 +1,18 @@
 group: BC-D4RL
-name: BC-evasion-v2
+name: BC-evasion-v2-multimodal
 project: CORL
 seed: 0
 
 train:
   batch_size: 32
   buffer_size: 36407
-  data_path: /home/lucas/Workspace/CORL/data/
-  checkpoints_path: /home/lucas/Workspace/CORL/out/BC-evasion-v2
+  data_path: /home/yixuany/workspace/CORL/data/
+  checkpoints_path: /home/yixuany/workspace/CORL/output
   device: cuda
   discount: 0.99
-  eval_freq: 50000
-  load_model: ''
-  max_timesteps: 5_000_000
+  eval_freq: 10000
+  load_model: /home/yixuany/workspace/CORL/output/checkpoint_150000.pt
+  max_timesteps: 2_000_000
 
 
 policy:
@@ -26,8 +26,8 @@ env:
   delta_t: 0.5
   radar_radius: 100
   aircraft_detection_range: 100
-  img_size: 200
-  action_dim: 1
+  img_size: 100
+  action_dim: 2
   action_normalized: True  #### If true, actions are normalized to [-1, 1]
   action_min: -36.0
   action_max: 36.0

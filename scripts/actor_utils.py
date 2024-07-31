@@ -49,7 +49,7 @@ class DiagGaussianDistribution(torch.distributions.Distribution):
         :param log_std_init: Initial value for the log standard deviation
         :return:
         """
-        mean_actions =  nn.Linear(latent_dim, self.action_dim)
+        mean_actions =  nn.Sequential(nn.Linear(latent_dim, self.action_dim), nn.Tanh())
         # TODO: allow action dependent std
         log_std = nn.Parameter(torch.ones(self.action_dim) * log_std_init, requires_grad=True)
         return mean_actions, log_std
@@ -117,7 +117,8 @@ class DiagGaussianDistribution(torch.distributions.Distribution):
             return self.mode()
         return self.sample()
     
-
+LOG_STD_MIN = -20.0
+LOG_STD_MAX = 2.0
 class ActorNet(nn.Module):
     def __init__(self,
                  observation_space,
@@ -146,7 +147,7 @@ class ActorNet(nn.Module):
         feature = self.feature_extractor(observations)
         latent = self.policy_net.forward(feature)
         mean_action = self.action_net.forward(latent)
-        distribution = self.act_dist.proba_distribution(mean_action, self.log_std)
+        distribution = self.act_dist.proba_distribution(mean_action, self.log_std.clamp(LOG_STD_MIN, LOG_STD_MAX))
         actions = distribution.get_actions(deterministic=deterministic)
         # log_prob = distribution.log_prob(actions)
         actions = actions.reshape((-1, *self.action_space.shape)) 
@@ -203,8 +204,9 @@ class FeatureExtractor(nn.Module):
                     total_concat_size += 1
                 else:
                     extractors[key] = nn.Flatten()
-                    total_concat_size += gym.spaces.utils.flatdim(subspace)
-                # print("Key: ", key, "Subspace dimension: ", gym.spaces.utils.flatdim(subspace), subspace.shape)
+                    # total_concat_size += gym.spaces.utils.flatdim(subspace)
+                    total_concat_size += subspace.shape[0]
+                # print("Key: ", key, "Subspace dimension: ", subspace.shape)
 
         self.extractors = nn.ModuleDict(extractors)
         self.features_dim = total_concat_size

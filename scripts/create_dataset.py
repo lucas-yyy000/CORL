@@ -1,13 +1,13 @@
 import numpy as np
-import minari
+# import minari
 import gymnasium as gym
 from utils import *
 from gymnasium.spaces import Dict, Box, Discrete
-from minari.serialization import serialize_space
+# from minari.serialization import serialize_space
 import statistics
 import yaml
 
-data_config_path = "/home/lucas/Workspace/evasion_guidance/evasion_guidance/" + "params/data_collection.yaml"
+data_config_path = "/home/yixuany/workspace/CORL/data/config.yml"
 with open(data_config_path,"r") as file_object:
     data_config = yaml.load(file_object,Loader=yaml.SafeLoader)
 
@@ -22,7 +22,7 @@ V = data_config['planner']['V']
 L1 = data_config['planner']['L1']
 time_interval = data_config['planner']['delta_t']
 
-with open("/home/lucas/Workspace/CORL/params/offline_data_config.yaml","r") as file_object:
+with open("/home/yixuany/workspace/CORL/params/offline_data_config.yaml","r") as file_object:
     offline_data_config = yaml.load(file_object,Loader=yaml.SafeLoader)
 
 processed_data_path = offline_data_config['output_path']
@@ -69,26 +69,17 @@ def generate_episode_data(data):
     truncations = []
     sars_data = []
     for i in range(len(path)-1):
-        # heat_map = get_radar_heat_map(path[i], radar_locs, img_size, 
-        #                          aircraft_detection_range, grid_size, radar_radius)
-        # observations.append({'heat_map': heat_map, 
-        #                     'goal_direction': center_state(path[i], goal_location),
-        #                     'time_spent': np.exp(i/time_scaling)})
+        heat_map = get_radar_heat_map(path[i], radar_locs, img_size, 
+                                 aircraft_detection_range, grid_size, radar_radius)
+        observations.append({'heat_map': heat_map, 
+                            'goal_direction': center_state(path[i], goal_location),
+                            'time_spent': np.exp(i/time_scaling)})
         
-        # heat_map_next = get_radar_heat_map(path[i+1], radar_locs, img_size, 
-        #                          aircraft_detection_range, grid_size, radar_radius)
-        # next_observations.append({'heat_map': heat_map_next, 
-        #                     'goal_direction': center_state(path[i+1], goal_location),
-        #                     'time_spent': np.exp((i+1)/time_scaling)})
-        # print(path[i])
-        # print(goal_location)
-        # print(path[i].extend(list(goal_location)))
-        state = [path[i][0], path[i][1], path[i][2], goal_location[0], goal_location[1]]
-        # print(state)
-        observations.append(state)
-        # print("State: ", observations[-1]['state'])
-        next_state = [path[i+1][0], path[i+1][1], path[i+1][2], goal_location[0], goal_location[1]]
-        next_observations.append(next_state)
+        heat_map_next = get_radar_heat_map(path[i+1], radar_locs, img_size, 
+                                 aircraft_detection_range, grid_size, radar_radius)
+        next_observations.append({'heat_map': heat_map_next, 
+                            'goal_direction': center_state(path[i+1], goal_location),
+                            'time_spent': np.exp((i+1)/time_scaling)})
         
         actions.append(inputs[i])
         dist_to_goal = np.linalg.norm(goal_location - path[i][:2])

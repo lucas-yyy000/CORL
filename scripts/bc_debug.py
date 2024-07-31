@@ -15,7 +15,7 @@ import wandb
 import argparse
 import yaml
 import pickle
-# from actor_utils import *
+from actor_utils import FeatureExtractor, ActorNet
 from tensordict import MemoryMappedTensor, TensorDict
 
 TensorBatch = List[torch.Tensor]
@@ -62,38 +62,38 @@ class ReplayBuffer:
                 next_states.append(loaded_dict['next_observation'])
                 dones.append(loaded_dict['termination'])
 
-        # states_tensor = TensorDict(
-        # {
-        #     "heat_map": MemoryMappedTensor.empty(
-        #         (len(states), *states[0]['heat_map'].shape),
-        #         dtype=torch.float32,
-        #     ),
-        #     "goal_direction": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32)
-        #     # 'time_spent':  MemoryMappedTensor.empty((len(states), 1), dtype=torch.float32) 
-        # },
-        #     batch_size=[batch_size],
-        #     device=self._device,
-        # )
+        states_tensor = TensorDict(
+        {
+            "heat_map": MemoryMappedTensor.empty(
+                (len(states), *states[0]['heat_map'].shape),
+                dtype=torch.float32,
+            ),
+            "goal_direction": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32)
+            # 'time_spent':  MemoryMappedTensor.empty((len(states), 1), dtype=torch.float32) 
+        },
+            batch_size=[batch_size],
+            device=self._device,
+        )
 
-        # next_states_tensor = TensorDict(
-        # {
-        #     "heat_map": MemoryMappedTensor.empty(
-        #         (len(states), *next_states[0]['heat_map'].shape),
-        #         dtype=torch.float32,
-        #     ),
-        #     "goal_direction": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32)
-        #     # 'time_spent':  MemoryMappedTensor.empty((len(states), 1), dtype=torch.float32) 
-        # },
-        #     batch_size=[batch_size],
-        #     device=self._device,
-        # )
+        next_states_tensor = TensorDict(
+        {
+            "heat_map": MemoryMappedTensor.empty(
+                (len(states), *next_states[0]['heat_map'].shape),
+                dtype=torch.float32,
+            ),
+            "goal_direction": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32)
+            # 'time_spent':  MemoryMappedTensor.empty((len(states), 1), dtype=torch.float32) 
+        },
+            batch_size=[batch_size],
+            device=self._device,
+        )
 
-        # for i in range(batch_size):
-        #     states_tensor[i] = TensorDict({"heat_map": states[i]['heat_map'], 
-        #                                    "goal_direction": states[i]['goal_direction'] / self._scaling}, [])
+        for i in range(batch_size):
+            states_tensor[i] = TensorDict({"heat_map": states[i]['heat_map'], 
+                                           "goal_direction": states[i]['goal_direction'] / self._scaling}, [])
             
-        #     next_states_tensor[i] = TensorDict({"heat_map": next_states[i]['heat_map'], 
-        #                                    "goal_direction": next_states[i]['goal_direction'] / self._scaling}, [])
+            next_states_tensor[i] = TensorDict({"heat_map": next_states[i]['heat_map'], 
+                                           "goal_direction": next_states[i]['goal_direction'] / self._scaling}, [])
             # states_tensor[i] = TensorDict({"heat_map": states[i]['heat_map'], 
             #                                "goal_direction": states[i]['goal_direction'] / self._scaling,
             #                                'time_spent': states[i]['time_spent']}, [])
@@ -101,27 +101,7 @@ class ReplayBuffer:
             # next_states_tensor[i] = TensorDict({"heat_map": next_states[i]['heat_map'], 
             #                                "goal_direction": next_states[i]['goal_direction'] / self._scaling,
             #                                'time_spent': next_states[i]['time_spent']}, [])
-            
-        # states = 
-        observations = []
-        next_observations = []
-        for i in range(batch_size):
-            state = states[i]
-            state[0] /= self._scaling
-            state[1] /= self._scaling
-            state[3] /= self._scaling
-            state[4] /= self._scaling
-            observations.append(state)
 
-            next_state = next_states[i]
-            next_state[0] /= self._scaling
-            next_state[1] /= self._scaling
-            next_state[3] /= self._scaling
-            next_state[4] /= self._scaling
-            next_observations.append(next_state)
-
-        observations = self._to_tensor(torch.from_numpy(np.asarray(observations)))
-        next_observations = self._to_tensor(torch.from_numpy(np.asarray(next_observations)))
         if self._action_normalized:
             if self._action_dim == 1:
                 actions = self._to_tensor(torch.from_numpy(np.asarray(actions) / self._action_scale)).unsqueeze(dim=-1)
@@ -132,7 +112,7 @@ class ReplayBuffer:
         rewards = self._to_tensor(torch.from_numpy(np.asarray(rewards)))
         dones = self._to_tensor(torch.from_numpy(np.asarray(dones)))
 
-        return [observations, actions, rewards, next_observations, dones]
+        return [states_tensor, actions, rewards, next_states_tensor, dones]
 
     def add_transition(self):
         # Use this method to add new data into the replay buffer during fine-tuning.
@@ -151,42 +131,37 @@ def wandb_init(config: dict) -> None:
     )
     wandb.run.save()
 
-class ActorNet(nn.Module):
-    def __init__(self,
-                 observation_space,
-                 action_space,
-                 hidden_sizes,
-                 hidden_act=nn.ReLU):
-        super().__init__()
-        if not isinstance(hidden_sizes, list):
-            raise TypeError('hidden_sizes should be a list')
-        self.action_space = action_space
-        action_dim = action_space.shape[0]
-        in_size = observation_space.shape[0]
-        mlp_extractor : List[nn.Module] = []
-        for curr_layer_dim in hidden_sizes:
-            mlp_extractor.append(nn.Linear(in_size, curr_layer_dim))
-            mlp_extractor.append(hidden_act())
-            in_size = curr_layer_dim
+    
+# class ActorNet(nn.Module):
+#     def __init__(self,
+#                  observation_space,
+#                  action_space,
+#                  hidden_sizes,
+#                  hidden_act=nn.ReLU):
+#         super().__init__()
+#         if not isinstance(hidden_sizes, list):
+#             raise TypeError('hidden_sizes should be a list')
+#         self.action_space = action_space
+#         action_dim = action_space.shape[0]
+#         self.feature_extractor = FeatureExtractor(observation_space)
+#         in_size = self.feature_extractor.features_dim
+#         mlp_extractor : List[nn.Module] = []
+#         for curr_layer_dim in hidden_sizes:
+#             mlp_extractor.append(nn.Linear(in_size, curr_layer_dim))
+#             mlp_extractor.append(hidden_act())
+#             in_size = curr_layer_dim
 
-        mlp_extractor.append(nn.Linear(in_size, action_dim))
-        mlp_extractor.append(nn.Tanh())
-        # self.latent_dim = in_size
-        self.policy_net = nn.Sequential(*mlp_extractor)
-        # self.act_dist = DiagGaussianDistribution(action_dim)
-        # self.action_net, self.log_std = self.act_dist.proba_distribution_net(self.latent_dim)
+#         self.latent_dim = in_size
+#         mlp_extractor.append(nn.Linear(self.latent_dim, action_dim))
+#         mlp_extractor.append(nn.Tanh())
+#         self.policy_net = nn.Sequential(*mlp_extractor)
 
-    def forward(self, observations, deterministic=False):
-        # feature = self.feature_extractor(observations)
-        # latent = self.policy_net.forward(feature)
-        # mean_action = self.action_net.forward(latent)
-        # distribution = self.act_dist.proba_distribution(mean_action, self.log_std)
-        # actions = distribution.get_actions(deterministic=deterministic)
-        # # log_prob = distribution.log_prob(actions)
-        # actions = actions.reshape((-1, *self.action_space.shape)) 
-        actions = self.policy_net(observations)
 
-        return actions, None
+#     def forward(self, observations, deterministic=False):
+#         feature = self.feature_extractor(observations)
+#         actions = self.policy_net.forward(feature)
+
+#         return actions
     
 
 class BC:
@@ -204,15 +179,28 @@ class BC:
         self.total_it = 0
         self.device = device
 
-    def train(self, batch: TensorBatch) -> Dict[str, float]:
+    def train(self, batch) -> Dict[str, float]:
         log_dict = {}
         self.total_it += 1
 
         state, action, _, _, _ = batch
-
+        batch_size = len(state)
+        # print("Batch Size: ", batch_size)
+        if batch_size < 1:
+            print("Batch Size: ", batch_size)
         # Compute actor loss
-        pi, _ = self.actor(state)
-        actor_loss = F.mse_loss(pi, action)
+        pi, dist = self.actor(state)
+        # print(dist)
+        # print("Actions: ", pi)
+        actor_loss = 0
+        log_prob = dist.distribution.log_prob(pi)
+        # action_log_prob = dist.log_prob(pi)
+        # print("Actions log probability: ", dist.distribution.log_prob(pi))
+        for i in range(pi.shape[0]):
+            actor_loss += - torch.exp( -(pi[i, 0] - action[i])**2 )*log_prob[i, 0] - torch.exp( -(pi[i, 1] - action[i])**2 )*log_prob[i, 1]
+
+        if batch_size > 0:
+            actor_loss /= batch_size
         log_dict["actor_loss"] = actor_loss.item()
         # Optimize the actor
         self.actor_optimizer.zero_grad()
@@ -247,8 +235,10 @@ def init_weights(module: nn.Module, gain: float = 1) -> None:
 def train(config):
     checkpoint_path = config['train']['checkpoints_path']
     print(f"Checkpoints path: ", checkpoint_path)
-    os.makedirs(checkpoint_path, exist_ok=True)
-    with open(os.path.join(checkpoint_path, "config.yaml"), "w") as f:
+    run_name = config['name'] + '-' + str(uuid.uuid4())[:8]
+    os.makedirs(os.path.join(checkpoint_path, run_name), exist_ok=True)
+    config['name'] = run_name
+    with open(os.path.join(os.path.join(checkpoint_path, run_name), "config.yaml"), "w") as f:
         yaml.dump(config, f)
 
     # Set environment parameters.
@@ -278,19 +268,25 @@ def train(config):
         device
     )
 
-    # observation_space= gym.spaces.Dict({"heat_map": gym.spaces.Box(0, 255, observation_img_size), 
-    #                         "goal_direction": gym.spaces.Box(-1, 1, shape=(2,)),
-    #                         'time_spent': gym.spaces.Box(low=1.0, high=np.inf, shape=(1,))})
-    # observation_space= gym.spaces.Dict({"heat_map": gym.spaces.Box(0, 255, observation_img_size), 
-    #                         "goal_direction": gym.spaces.Box(-1, 1, shape=(2,))})
-    observation_space = gym.spaces.Box(-1, 1, shape=(5,))
+    observation_space= gym.spaces.Dict({"heat_map": gym.spaces.Box(0, 255, observation_img_size), 
+                            "goal_direction": gym.spaces.Box(-1, 1, shape=(2,))})
+    # observation_space = gym.spaces.Box(-1, 1, shape=(5,))
 
     assert config['policy']['hidden_act'] == 'Tanh' or config['policy']['hidden_act'] == 'ReLU', "Currently only support ReLU or Tanh."
     if config['policy']['hidden_act'] == 'Tanh':
         actor = ActorNet(observation_space, action_space, config['policy']['actor_net_hidden'], hidden_act=nn.Tanh).to(device)
     if config['policy']['hidden_act'] == 'ReLU':
         actor = ActorNet(observation_space, action_space, config['policy']['actor_net_hidden'], hidden_act=nn.ReLU).to(device)
-    init_weights(actor)
+    
+    load_model_from = config['train']['load_model']
+    if load_model_from == '':
+        init_weights(actor)
+    else:
+        print("Load model from: ", load_model_from)
+        model_dict = torch.load(load_model_from)
+        actor.load_state_dict(model_dict['actor'])
+        actor.train()
+
     actor_optimizer = torch.optim.Adam(actor.parameters(), lr=config['policy']['lr_rate'])
 
     kwargs = {
@@ -318,14 +314,15 @@ def train(config):
         batch = replay_buffer.sample(batch_size)
         batch = [b.to(device) for b in batch]
         log_dict = trainer.train(batch)
-        wandb.log(log_dict, step=trainer.total_it)
+        if t % 500 == 0:
+            wandb.log(log_dict, step=trainer.total_it)
         # Evaluate episode
-        if (t + 1) % eval_freq == 0:
+        if t % eval_freq == 0:
             print(f"Time steps: {t + 1}")
             if checkpoint_path is not None:
                 torch.save(
                     trainer.state_dict(),
-                    os.path.join(checkpoint_path, f"checkpoint_{t}.pt"),
+                    os.path.join(checkpoint_path, run_name, f"checkpoint_{t}.pt"),
                 )
 
 

@@ -35,17 +35,17 @@ LOG_STD_MAX = 2.0
 @dataclass
 class TrainConfig:
     # Experiment
-    device: str = "cuda"
+    device: str = "cuda:1"
     env: str = "evasion-v1"  # OpenAI gym environment name
     seed: int = 0  # Sets Gym, PyTorch and Numpy seeds
-    eval_freq: int = int(5e3)  # How often (time steps) we evaluate
+    eval_freq: int = int(50000)  # How often (time steps) we evaluate
     n_episodes: int = 10  # How many episodes run during evaluation
     max_timesteps: int = int(5_000_000)  # Max time steps to run environment
     checkpoints_path: str = "/home/yixuany/workspace/CORL/output"  # Save path
     load_model: str = ""  # Model load file name, "" doesn't load
     # IQL
-    buffer_size: int = 50*4500  # Replay buffer size
-    batch_size: int = 128  # Batch size for all networks
+    buffer_size: int = 36407  # Replay buffer size
+    batch_size: int = 32  # Batch size for all networks
     discount: float = 0.99  # Discount factor
     tau: float = 0.005  # Target network update rate
     beta: float = 3.0  # Inverse temperature. Small beta -> BC, big beta -> maximizing Q
@@ -108,10 +108,19 @@ def wrap_env(
 class ReplayBuffer:
     def __init__(
         self,
+        action_dim: int,
+        action_normalized: bool,
+        action_scale: float,
+        map_range: float,
         buffer_size: int,
-        device: str = "cuda",
-        data_path = "/home/yixuany/workspace/CORL/offline_data/"
-    ):
+        data_path: str = "/home/yixuany/workspace/CORL/data/",
+        device: str = "cuda"
+    ):  
+        self._action_dim = action_dim
+        self._action_normalized = action_normalized
+        self._action_scale = action_scale
+        self._scaling = map_range / 2.0
+
         self._buffer_size = buffer_size
 
         self._device = device
@@ -165,16 +174,26 @@ class ReplayBuffer:
         )
 
         for i in range(batch_size):
+            # states_tensor[i] = TensorDict({"heat_map": states[i]['heat_map'], 
+            #                                "goal_direction": states[i]['goal_direction'] / self._scaling}, [])
+            
+            # next_states_tensor[i] = TensorDict({"heat_map": next_states[i]['heat_map'], 
+            #                                "goal_direction": next_states[i]['goal_direction'] / self._scaling}, [])
             states_tensor[i] = TensorDict({"heat_map": states[i]['heat_map'], 
-                                           "goal_direction": states[i]['goal_direction'] / 500.0,
+                                           "goal_direction": states[i]['goal_direction'] / self._scaling,
                                            'time_spent': states[i]['time_spent']}, [])
             
             next_states_tensor[i] = TensorDict({"heat_map": next_states[i]['heat_map'], 
-                                           "goal_direction": next_states[i]['goal_direction'] / 500.0,
+                                           "goal_direction": next_states[i]['goal_direction'] / self._scaling,
                                            'time_spent': next_states[i]['time_spent']}, [])
-            
-        # states = 
-        actions = self._to_tensor(torch.from_numpy(np.asarray(actions) / 40.0)).unsqueeze(dim=-1)
+
+        if self._action_normalized:
+            if self._action_dim == 1:
+                actions = self._to_tensor(torch.from_numpy(np.asarray(actions) / self._action_scale)).unsqueeze(dim=-1)
+            else:
+                actions = self._to_tensor(torch.from_numpy(np.asarray(actions) / self._action_scale))
+        else:
+            actions = self._to_tensor(torch.from_numpy(np.asarray(actions)))
         rewards = self._to_tensor(torch.from_numpy(np.asarray(rewards)))
         dones = self._to_tensor(torch.from_numpy(np.asarray(dones)))
 
@@ -260,7 +279,28 @@ class MLP(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
 
+class GaussianPolicy(nn.Module):
+    def __init__(
+        self,
+        state_dim: int,
+        act_dim: int,
+        max_action: float,
+        hidden_dim: int = 256,
+        n_hidden: int = 2,
+        dropout: Optional[float] = None,
+    ):
+        super().__init__()
+        self.net = MLP(
+            [state_dim, *([hidden_dim] * n_hidden), act_dim],
+            output_activation_fn=nn.Tanh,
+        )
+        self.log_std = nn.Parameter(torch.zeros(act_dim, dtype=torch.float32))
+        self.max_action = max_action
 
+    def forward(self, obs: torch.Tensor) -> Normal:
+        mean = self.net(obs)
+        std = torch.exp(self.log_std.clamp(LOG_STD_MIN, LOG_STD_MAX))
+        return Normal(mean, std)
 
 class ActorNet(nn.Module):
     def __init__(self,
@@ -275,27 +315,12 @@ class ActorNet(nn.Module):
         action_dim = action_space.shape[0]
         self.feature_extractor = FeatureExtractor(observation_space)
         in_size = self.feature_extractor.features_dim
-        mlp_extractor : List[nn.Module] = []
-        for curr_layer_dim in hidden_sizes:
-            mlp_extractor.append(nn.Linear(in_size, curr_layer_dim))
-            mlp_extractor.append(hidden_act())
-            in_size = curr_layer_dim
-
-        self.latent_dim = in_size
-        self.policy_net = nn.Sequential(*mlp_extractor)
-        self.act_dist = DiagGaussianDistribution(action_dim)
-        self.action_net, self.log_std = self.act_dist.proba_distribution_net(self.latent_dim)
+        self.policy = GaussianPolicy(in_size, action_dim, max_action=1.0)
 
     def forward(self, observations, deterministic=False):
         feature = self.feature_extractor(observations)
-        latent = self.policy_net.forward(feature)
-        mean_action = self.action_net.forward(latent)
-        distribution = self.act_dist.proba_distribution(mean_action, self.log_std)
-        actions = distribution.get_actions(deterministic=deterministic)
-        # log_prob = distribution.log_prob(actions)
-        actions = actions.reshape((-1, *self.action_space.shape)) 
 
-        return actions, distribution
+        return self.policy(feature)
     
 
 
@@ -409,7 +434,7 @@ class ImplicitQLearning:
         log_dict: Dict,
     ):
         exp_adv = torch.exp(self.beta * adv.detach()).clamp(max=EXP_ADV_MAX)
-        policy_out, _ = self.actor(observations)
+        policy_out = self.actor(observations)
         if isinstance(policy_out, torch.distributions.Distribution):
             bc_losses = -policy_out.log_prob(actions).sum(-1, keepdim=False)
         elif torch.is_tensor(policy_out):
@@ -494,8 +519,12 @@ def init_weights(module: nn.Module, gain: float = 1) -> None:
 def train(config: TrainConfig):
 
     replay_buffer = ReplayBuffer(
-        config.buffer_size,
-        config.device,
+        action_dim=1.0,
+        action_normalized=True,
+        action_scale=36.0,
+        map_range=1000.0,
+        buffer_size=config.buffer_size,
+        device=config.device,
     )
 
     # max_action = torch.inf
@@ -595,7 +624,7 @@ def train(config: TrainConfig):
         #     wandb.log(
         #         {"d4rl_normalized_score": normalized_eval_score}, step=trainer.total_it
         #     )
-        if (t + 1) % config.eval_freq == 0:
+        if t % config.eval_freq == 0:
             print("Iter: ", t)
             if config.checkpoints_path is not None:
                 torch.save(

@@ -155,3 +155,6 @@ out/
 data/
 data_heatmaps/
 *.pkl
+*.zip
+*.png
+output/
