@@ -1,0 +1,57 @@
+info:
+  # Wandb logging
+  project: CORL
+  group: IQL-D4RL
+  name: IQL
+
+map_params:
+  V: 30.0
+  action_dim: 1
+  aircraft_detection_range: 100
+  delta_t: 0.5
+  goal_tolerance: 25.0
+  img_size: 100
+  map_size: 1000
+  max_time_step: 100
+  observation:
+    goal_direction_normalized: true
+    heat_map_normalized: false
+    time_scaling: 25
+  radar_radius: 100
+
+
+train:
+    # Experiment
+    device: cuda:1
+    env: evasion-v1  # OpenAI gym environment name
+    seed: 0  # Sets Gym, PyTorch and Numpy seeds
+    eval_freq: 500  # How often (time steps) we evaluate
+    n_episodes: 10  # How many episodes run during evaluation
+    max_timesteps: 1000  # Max time steps to run environment
+    checkpoints_path: /home/yixuany/workspace/CORL/output  # Save path
+    load_model: ''  # Model load file name, "" doesn't load
+    # IQL
+    buffer_size: 100  # Replay buffer size
+    batch_size: 8  # Batch size for all networks
+    discount: 0.99  # Discount factor
+    tau: 0.005  # Target network update rate
+    beta: 3.0  # Inverse temperature. Small beta -> BC, big beta -> maximizing Q
+    iql_tau: 0.7  # Coefficient for asymmetric loss
+    iql_deterministic: False  # Use deterministic actor
+    normalize: True  # Normalize states
+    normalize_reward: False  # Normalize reward
+    vf_lr: 0.0003  # V function learning rate
+    qf_lr: 0.0003  # Critic learning rate
+    actor_lr: 0.0001  # Actor learning rate
+    actor_dropout: None  # Adroit uses dropout for policy network
+    data_path: /home/yixuany/workspace/CORL/data/
+policy:
+  actor_net_hidden: [64, 64]
+  hidden_act: Tanh
+  actor_dropout: null
+  action_scale: 36.0
+  action_max: 36.0
+  action_min: -36.0
+  action_normalized: true
+  LOG_STD_MIN: -20.0
+  LOG_STD_MAX: 2.0

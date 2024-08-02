@@ -7,8 +7,9 @@ import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-
-import d4rl
+import yaml
+import argparse
+# import d4rl
 import gymnasium as gym
 import numpy as np
 import pyrallis
@@ -25,49 +26,7 @@ from actor_utils import FeatureExtractor, DiagGaussianDistribution
 # from gymnasium.spaces import Dict, Box, Discrete
 
 TensorBatch = List[torch.Tensor]
-
-
 EXP_ADV_MAX = 100.0
-LOG_STD_MIN = -20.0
-LOG_STD_MAX = 2.0
-
-
-@dataclass
-class TrainConfig:
-    # Experiment
-    device: str = "cuda:1"
-    env: str = "evasion-v1"  # OpenAI gym environment name
-    seed: int = 0  # Sets Gym, PyTorch and Numpy seeds
-    eval_freq: int = int(50000)  # How often (time steps) we evaluate
-    n_episodes: int = 10  # How many episodes run during evaluation
-    max_timesteps: int = int(5_000_000)  # Max time steps to run environment
-    checkpoints_path: str = "/home/yixuany/workspace/CORL/output"  # Save path
-    load_model: str = ""  # Model load file name, "" doesn't load
-    # IQL
-    buffer_size: int = 36407  # Replay buffer size
-    batch_size: int = 32  # Batch size for all networks
-    discount: float = 0.99  # Discount factor
-    tau: float = 0.005  # Target network update rate
-    beta: float = 3.0  # Inverse temperature. Small beta -> BC, big beta -> maximizing Q
-    iql_tau: float = 0.7  # Coefficient for asymmetric loss
-    iql_deterministic: bool = False  # Use deterministic actor
-    normalize: bool = True  # Normalize states
-    normalize_reward: bool = False  # Normalize reward
-    vf_lr: float = 3e-4  # V function learning rate
-    qf_lr: float = 3e-4  # Critic learning rate
-    actor_lr: float = 1e-4  # Actor learning rate
-    actor_dropout: Optional[float] = None  # Adroit uses dropout for policy network
-    # Wandb logging
-    project: str = "CORL"
-    group: str = "IQL-D4RL"
-    name: str = "IQL"
-
-    def __post_init__(self):
-        self.name = f"{self.name}-{self.env}-{str(uuid.uuid4())[:8]}"
-        if self.checkpoints_path is not None:
-            self.checkpoints_path = os.path.join(self.checkpoints_path, self.name)
-
-
 def soft_update(target: nn.Module, source: nn.Module, tau: float):
     for target_param, source_param in zip(target.parameters(), source.parameters()):
         target_param.data.copy_((1 - tau) * target_param.data + tau * source_param.data)
@@ -113,8 +72,8 @@ class ReplayBuffer:
         action_scale: float,
         map_range: float,
         buffer_size: int,
-        data_path: str = "/home/yixuany/workspace/CORL/data/",
-        device: str = "cuda"
+        data_path: str,
+        device: str
     ):  
         self._action_dim = action_dim
         self._action_normalized = action_normalized
@@ -174,11 +133,6 @@ class ReplayBuffer:
         )
 
         for i in range(batch_size):
-            # states_tensor[i] = TensorDict({"heat_map": states[i]['heat_map'], 
-            #                                "goal_direction": states[i]['goal_direction'] / self._scaling}, [])
-            
-            # next_states_tensor[i] = TensorDict({"heat_map": next_states[i]['heat_map'], 
-            #                                "goal_direction": next_states[i]['goal_direction'] / self._scaling}, [])
             states_tensor[i] = TensorDict({"heat_map": states[i]['heat_map'], 
                                            "goal_direction": states[i]['goal_direction'] / self._scaling,
                                            'time_spent': states[i]['time_spent']}, [])
@@ -209,8 +163,8 @@ class ReplayBuffer:
 def wandb_init(config: dict) -> None:
     wandb.init(
         config=config,
-        project=config["project"],
-        group=config["group"],
+        project=config['info']["project"],
+        group=config['info']["group"],
         name=config["name"],
         id=str(uuid.uuid4()),
     )
@@ -285,6 +239,8 @@ class GaussianPolicy(nn.Module):
         state_dim: int,
         act_dim: int,
         max_action: float,
+        log_std_min: float,
+        log_std_max: float,
         hidden_dim: int = 256,
         n_hidden: int = 2,
         dropout: Optional[float] = None,
@@ -296,26 +252,26 @@ class GaussianPolicy(nn.Module):
         )
         self.log_std = nn.Parameter(torch.zeros(act_dim, dtype=torch.float32))
         self.max_action = max_action
+        self.log_std_min = log_std_min
+        self.log_std_max = log_std_max
 
     def forward(self, obs: torch.Tensor) -> Normal:
         mean = self.net(obs)
-        std = torch.exp(self.log_std.clamp(LOG_STD_MIN, LOG_STD_MAX))
+        std = torch.exp(self.log_std.clamp(self.log_std_min, self.log_std_max))
         return Normal(mean, std)
 
 class ActorNet(nn.Module):
     def __init__(self,
                  observation_space,
                  action_space,
-                 hidden_sizes,
-                 hidden_act=nn.ReLU):
+                 log_std_min: float,
+                log_std_max: float,):
         super().__init__()
-        if not isinstance(hidden_sizes, list):
-            raise TypeError('hidden_sizes should be a list')
         self.action_space = action_space
         action_dim = action_space.shape[0]
         self.feature_extractor = FeatureExtractor(observation_space)
         in_size = self.feature_extractor.features_dim
-        self.policy = GaussianPolicy(in_size, action_dim, max_action=1.0)
+        self.policy = GaussianPolicy(in_size, action_dim, max_action=1.0, log_std_min=log_std_min, log_std_max=log_std_max)
 
     def forward(self, observations, deterministic=False):
         feature = self.feature_extractor(observations)
@@ -515,51 +471,68 @@ def init_weights(module: nn.Module, gain: float = 1) -> None:
         if module.bias is not None:
             module.bias.data.fill_(0.0)
 
-@pyrallis.wrap()
-def train(config: TrainConfig):
-
+def train(config):
+    ##################################################################
+    ####      Set up check point path and save the training config ###
+    ##################################################################
+    checkpoint_path = config['train']['checkpoints_path']
+    print(f"Checkpoints path: ", checkpoint_path)
+    run_name = config['info']['name'] + '-' + str(uuid.uuid4())[:8]
+    os.makedirs(os.path.join(checkpoint_path, run_name), exist_ok=True)
+    config['name'] = run_name
+    with open(os.path.join(os.path.join(checkpoint_path, run_name), "config.yaml"), "w") as f:
+        yaml.dump(config, f)
+    #######################################
+    ###           Set up Dataloader     ###
+    #######################################
+    action_dim = config['map_params']['action_dim']
+    action_normalized = config['policy']['action_normalized']
+    action_scale = config['policy']['action_scale']
+    map_range = config['map_params']['map_size']
+    buffer_size = config['train']['buffer_size']
+    device = config['train']['device']
+    data_path = config['train']['data_path']
     replay_buffer = ReplayBuffer(
-        action_dim=1.0,
-        action_normalized=True,
-        action_scale=36.0,
-        map_range=1000.0,
-        buffer_size=config.buffer_size,
-        device=config.device,
+        action_dim=action_dim,
+        action_normalized=action_normalized,
+        action_scale=action_scale,
+        map_range=map_range,
+        buffer_size=buffer_size,
+        data_path = data_path,
+        device=device,
     )
 
-    # max_action = torch.inf
-
-    if config.checkpoints_path is not None:
-        print(f"Checkpoints path: {config.checkpoints_path}")
-        os.makedirs(config.checkpoints_path, exist_ok=True)
-        with open(os.path.join(config.checkpoints_path, "config.yaml"), "w") as f:
-            pyrallis.dump(config, f)
-
-    # Set seeds
-    seed = config.seed
-    # set_seed(seed, env)
-
     # Set environment parameters.
-    img_size = 100
+    img_size = config['map_params']['img_size']
     observation_img_size = [1, img_size, img_size]
-    action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(1,))
-    observation_space= gym.spaces.Dict({"heat_map": gym.spaces.Box(0, 255, observation_img_size), 
-                            "goal_direction": gym.spaces.Box(-1, 1, shape=(2,)),
-                            'time_spent': gym.spaces.Box(low=1.0, high=np.inf, shape=(1,))})
-    action_dim = 1
+    action_dim = config['map_params']['action_dim']
+    if action_normalized:
+        action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(action_dim,))
+    else:
+        action_min = config['env']['action_min']
+        action_max = config['env']['action_max']
+        action_space = gym.spaces.Box(low=action_min, high=action_max, shape=(action_dim,))
     
+    observation_space= gym.spaces.Dict({"heat_map": gym.spaces.Box(0, 255, observation_img_size), 
+                        "goal_direction": gym.spaces.Box(-1, 1, shape=(2,)),
+                        'time_spent': gym.spaces.Box(0, np.inf, shape=(1,))})
     # Set up neural network modules.
-    actor = ActorNet(observation_space, action_space, [64, 64], hidden_act=nn.Tanh).to(config.device)
+    log_std_min = config['policy']['LOG_STD_MIN']
+    log_std_max = config['policy']['LOG_STD_MAX']
+    actor = ActorNet(observation_space, action_space, log_std_min, log_std_max).to(device)
     init_weights(actor, gain=1e-5)
-    q_network = TwinQ(observation_space, action_dim).to(config.device)
+    q_network = TwinQ(observation_space, action_dim).to(device)
     init_weights(q_network)
-    v_network = ValueFunction(observation_space).to(config.device)
+    v_network = ValueFunction(observation_space).to(device)
     init_weights(v_network)
-
-    v_optimizer = torch.optim.Adam(v_network.parameters(), lr=config.vf_lr)
-    q_optimizer = torch.optim.Adam(q_network.parameters(), lr=config.qf_lr)
-    actor_optimizer = torch.optim.Adam(actor.parameters(), lr=config.actor_lr)
-
+    
+    actor_lr = config['train']['actor_lr']
+    vf_lr = config['train']['vf_lr']
+    qf_lr = config['train']['qf_lr']
+    v_optimizer = torch.optim.Adam(v_network.parameters(), lr=vf_lr)
+    q_optimizer = torch.optim.Adam(q_network.parameters(), lr=qf_lr)
+    actor_optimizer = torch.optim.Adam(actor.parameters(), lr=actor_lr)
+    max_steps = config['train']['max_timesteps']
     kwargs = {
         # "max_action": max_action,
         "actor": actor,
@@ -568,68 +541,54 @@ def train(config: TrainConfig):
         "q_optimizer": q_optimizer,
         "v_network": v_network,
         "v_optimizer": v_optimizer,
-        "discount": config.discount,
-        "tau": config.tau,
-        "device": config.device,
+        "discount": config['train']['discount'],
+        "tau": config['train']['tau'],
+        "device": device,
         # IQL
-        "beta": config.beta,
-        "iql_tau": config.iql_tau,
-        "max_steps": config.max_timesteps,
+        "beta": config['train']['beta'],
+        "iql_tau": config['train']['iql_tau'],
+        "max_steps": max_steps,
     }
-
-    print("---------------------------------------")
-    print(f"Training IQL, Env: {config.env}, Seed: {seed}")
-    print("---------------------------------------")
 
     # Initialize actor
     trainer = ImplicitQLearning(**kwargs)
 
-    if config.load_model != "":
-        policy_file = Path(config.load_model)
+    if config['train']['load_model'] != "":
+        policy_file = Path(config['train']['load_model'])
         trainer.load_state_dict(torch.load(policy_file))
         actor = trainer.actor
 
-    wandb_init(asdict(config))
-
+    wandb_init(config)
+    batch_size = config['train']['batch_size']
+    eval_freq = config['train']['eval_freq']
     # evaluations = []
-    for t in range(int(config.max_timesteps)):
-        batch = replay_buffer.sample(config.batch_size)
-        batch = [b.to(config.device) for b in batch]
+    for t in range(int(max_steps)):
+        batch = replay_buffer.sample(batch_size)
+        batch = [b.to(device) for b in batch]
         log_dict = trainer.train(batch)
         wandb.log(log_dict, step=trainer.total_it)
-        # Evaluate episode
-        # if (t + 1) % config.eval_freq == 0:
-        #     print(f"Time steps: {t + 1}")
-        #     eval_scores = eval_actor(
-        #         env,
-        #         actor,
-        #         device=config.device,
-        #         n_episodes=config.n_episodes,
-        #         seed=config.seed,
-        #     )
-        #     eval_score = eval_scores.mean()
-        #     normalized_eval_score = env.get_normalized_score(eval_score) * 100.0
-        #     evaluations.append(normalized_eval_score)
-        #     print("---------------------------------------")
-        #     print(
-        #         f"Evaluation over {config.n_episodes} episodes: "
-        #         f"{eval_score:.3f} , D4RL score: {normalized_eval_score:.3f}"
-        #     )
-        #     print("---------------------------------------")
-        #     if config.checkpoints_path is not None:
-        #         torch.save(
-        #             trainer.state_dict(),
-        #             os.path.join(config.checkpoints_path, f"checkpoint_{t}.pt"),
-        #         )
-        #     wandb.log(
-        #         {"d4rl_normalized_score": normalized_eval_score}, step=trainer.total_it
-        #     )
-        if t % config.eval_freq == 0:
+        if t % eval_freq == 0:
             print("Iter: ", t)
-            if config.checkpoints_path is not None:
+            if checkpoint_path is not None:
                 torch.save(
                     trainer.state_dict(),
-                    os.path.join(config.checkpoints_path, f"checkpoint_{t}.pt"),
+                    os.path.join(os.path.join(checkpoint_path, run_name), f"checkpoint_{t}.pt"),
                 )
+
+
+def get_args():
+    # Arguments
+    parser = argparse.ArgumentParser(
+        description='Train a policy with IQL.'
+    )
+    parser.add_argument('config', type=str, help='Path to config file.')
+    parser.add_argument('--no-cuda', action='store_true', help='Do not use cuda.')
+    args = parser.parse_args()
+    return args
+
 if __name__ == "__main__":
-    train()
+    args = get_args()
+    with open(args.config,"r") as file_object:
+        config = yaml.load(file_object,Loader=yaml.SafeLoader)
+
+    train(config)
