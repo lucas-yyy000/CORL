@@ -1,0 +1,58 @@
+info:
+  name: PPO_finetune
+  project: CORL
+  seed: 0
+
+train:
+  batch_size: 32
+  minibatch_size: 8
+  checkpoints_path: /home/yixuany/workspace/CORL/output
+  device: cuda
+  discount: 0.99
+  load_model: /home/yixuany/workspace/CORL/output/BC-evasion-v2-multimodal-fdfb354f/checkpoint_1550000.pt
+  load_critic_model: /home/yixuany/workspace/CORL/output/PPO_finetune-0dc38e2d/critic_checkpoint_40000.pt
+  max_training_iterations: 500_000
+  max_episode_length: 1024
+  critic_warmup_iterations: 0
+  actor_lr: 0.0003  # Actor learning rate
+  critic_lr: 0.0005
+  policy_specs:
+    actor_net_hidden: [64, 64]
+    hidden_act: ReLU
+
+  # Algorithm specific arguments
+  gamma: 0.99
+  gae_lambda: 0.95
+  update_epochs: 4
+  norm_adv: True
+  clip_coef: 0.1
+  clip_vloss: True
+  ent_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  target_kl: None
+
+eval:
+  eval_freq: 12_000
+  n_episodes: 5
+  seed: 0
+
+
+env:
+  map_size: 1000
+  V: 30.0
+  delta_t: 0.5
+  radar_radius: 100
+  aircraft_detection_range: 100
+  img_size: 100
+  action_dim: 1
+  action_normalized: True  #### If true, actions are normalized to [-1, 1]
+  action_min: -36.0
+  action_max: 36.0
+  max_time_step: 200
+  goal_tolerance: 25.0
+  reward_normalization_factor: 100
+  observation:
+    heat_map_normalized: False
+    goal_direction_normalized: True
+    time_scaling: 25

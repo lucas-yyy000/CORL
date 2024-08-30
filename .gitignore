@@ -158,3 +158,5 @@ data_heatmaps/
 *.zip
 *.png
 output/
+finetune_data/
+finetune_data_sac/

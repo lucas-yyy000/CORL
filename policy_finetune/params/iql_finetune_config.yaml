@@ -1,0 +1,54 @@
+info:
+  name: IQL_finetune
+  project: CORL
+  seed: 0
+
+train:
+  batch_size: 32
+  buffer_size: 36407
+  data_path: /home/yixuany/workspace/CORL/data/
+  checkpoints_path: /home/yixuany/workspace/CORL/output
+  device: cuda
+  discount: 0.99
+  eval_freq: 12_000
+  load_model: /home/yixuany/workspace/CORL/output/BC-evasion-v2-multimodal-fdfb354f/checkpoint_1550000.pt
+  max_timesteps: 3_000_000
+  value_network_warmup_steps: 1_000_000
+  discount: 0.99  # Discount factor
+  tau: 0.005  # Target network update rate
+  beta: 3.0  # Inverse temperature. Small beta -> BC, big beta -> maximizing Q
+  iql_tau: 0.7  # Coefficient for asymmetric loss
+  iql_deterministic: False  # Use deterministic actor
+  normalize: True  # Normalize states
+  normalize_reward: False  # Normalize reward
+  vf_lr: 0.0003  # V function learning rate
+  qf_lr: 0.0003  # Critic learning rate
+  actor_lr: 0.0001  # Actor learning rate
+
+eval:
+  eval_freq: 12_000
+  n_episodes: 5
+  seed: 0
+
+policy:
+  actor_net_hidden: [64, 64]
+  hidden_act: ReLU
+  lr_rate: 0.0003
+
+env:
+  map_size: 1000
+  V: 30.0
+  delta_t: 0.5
+  radar_radius: 100
+  aircraft_detection_range: 100
+  img_size: 100
+  action_dim: 1
+  action_normalized: True  #### If true, actions are normalized to [-1, 1]
+  action_min: -36.0
+  action_max: 36.0
+  max_time_step: 100
+  goal_tolerance: 25.0
+  observation:
+    heat_map_normalized: False
+    goal_direction_normalized: True
+    time_scaling: 25

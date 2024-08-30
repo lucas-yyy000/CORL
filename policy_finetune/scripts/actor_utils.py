@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 from typing import List, Dict
@@ -153,6 +154,16 @@ class ActorNet(nn.Module):
         actions = actions.reshape((-1, *self.action_space.shape)) 
 
         return actions, distribution
+    
+    @torch.no_grad()
+    def act(self, observation, device):
+        # print("Observation: ", observation)
+        u, distribution = self.forward(observation.unsqueeze(0))
+        log_prob = distribution.distribution.log_prob(u).squeeze().cpu().detach().numpy()
+        u = u.squeeze().cpu().detach().numpy()
+        u = self.action_space.high[0]*(u[np.argmax(log_prob)])
+
+        return u
     
 class NatureCNN(nn.Module):
     def __init__(
