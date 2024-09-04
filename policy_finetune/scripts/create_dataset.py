@@ -17,7 +17,7 @@ max_num_radar = data_config['env']['max_num_radar']
 V = data_config['planner']['V']
 L1 = data_config['planner']['L1']
 time_interval = data_config['planner']['delta_t']
-
+risk_interval = data_config['planner']['risk_buffer_length']
 with open("/home/yixuany/workspace/CORL/policy_finetune/params/offline_data_config.yaml","r") as file_object:
     offline_data_config = yaml.load(file_object,Loader=yaml.SafeLoader)
 
@@ -64,15 +64,19 @@ def generate_episode_data(data):
     terminations = []
     truncations = []
     sars_data = []
+    risk_measure = np.zeros(risk_interval)
     prev_goal_dir = None
     for i in range(len(path)-1):
+        risk_measure[i % risk_interval] = risks[i]
+        
         heat_map = get_radar_heat_map(path[i], radar_locs, img_size, 
                                  aircraft_detection_range, grid_size)
         goal_dir = center_state(path[i], goal_location)
         observations.append({'heat_map': heat_map, 
                             'goal_direction': goal_dir,
                             'current_loc': path[i][:2],
-                            'time_spent': np.array([np.cos(i / time_max), np.sin(i / time_max)])})
+                            'time_spent': np.array([np.cos(i / time_max), np.sin(i / time_max)]),
+                            'risk_measure':  np.array([np.mean(risk_measure), np.max(risk_measure)])})
         
         heat_map_next = get_radar_heat_map(path[i+1], radar_locs, img_size, 
                                  aircraft_detection_range, grid_size)
@@ -80,7 +84,8 @@ def generate_episode_data(data):
         next_observations.append({'heat_map': heat_map_next, 
                             'goal_direction': center_state(path[i+1], goal_location),
                             'current_loc': path[i+1][:2],
-                            'time_spent': np.array([np.cos(i / time_max), np.sin(i / time_max)])})
+                            'time_spent': np.array([np.cos(i / time_max), np.sin(i / time_max)]),
+                            'risk_measure':  np.array([np.mean(risk_measure), np.max(risk_measure)])})
         
         actions.append(inputs[i])
         dist_to_goal = np.linalg.norm(goal_location - path[i][:2])
@@ -96,10 +101,6 @@ def generate_episode_data(data):
             print("Breaking...")
             break
         elif i < time_max and dist_to_goal > goal_tolerance:
-            # if prev_goal_dir is None:
-            #     reward = -risks[i]
-            # else:
-            #     reward = -risks[i] + (np.linalg.norm(prev_goal_dir) - np.linalg.norm(goal_dir)) / (map_range / 2.0)
             reward = -risks[i]
             rewards.append(reward)
             truncations.append(False)

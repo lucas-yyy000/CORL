@@ -92,7 +92,9 @@ def train(config):
         action_space = gym.spaces.Box(low=action_min, high=action_max, shape=(2*action_dim,))
     
     observation_space= gym.spaces.Dict({"heat_map": gym.spaces.Box(0, 255, observation_img_size), 
-                        "goal_direction": gym.spaces.Box(-1, 1, shape=(2,))})
+                    "goal_direction": gym.spaces.Box(-1, 1, shape=(2,)),
+                    "current_loc": gym.spaces.Box(0, 1, shape=(2,)),
+                    "time_spent": gym.spaces.Box(-1, 1, shape=(2,))})
 
 
     ### Set up Gym Env
@@ -116,7 +118,7 @@ def train(config):
     env = RadarEnv(map_config, device)
 
     # wandb_init(config)
-    writer = SummaryWriter()
+    # writer = SummaryWriter()
 
     ### ALGO Logic: Storage setup
     num_steps = config['train']['max_episode_length']
@@ -128,7 +130,9 @@ def train(config):
                 (num_steps, *observation_img_size),
                 dtype=torch.float32,
             ),
-            "goal_direction": MemoryMappedTensor.empty((num_steps, 2), dtype=torch.float32)
+            "goal_direction": MemoryMappedTensor.empty((num_steps, 2), dtype=torch.float32),
+            "current_loc": MemoryMappedTensor.empty((num_steps, 2), dtype=torch.float32),
+            "time_spent":  MemoryMappedTensor.empty((num_steps, 2), dtype=torch.float32)
         },
             batch_size=[num_steps],
             device=device,
@@ -142,7 +146,7 @@ def train(config):
 
     ### TRY NOT TO MODIFY: start the game
     global_step = 0
-    next_obs, _ = env.reset()
+    next_obs = env.reset()
     next_done = torch.zeros(1).to(device)
 
     batch_size = config['train']['batch_size']
@@ -328,37 +332,38 @@ def train(config):
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
 
         ### Log with wandb
-        # log_dict = {}
-        # if iteration >= critic_warmup_iterations:
-        #     log_dict['actor_learning_rate'] = actor_optimizer.param_groups[0]["lr"]
-        # log_dict['critic_learning_rate'] = critic_optimizer.param_groups[0]["lr"]
-        # log_dict['value_loss'] = v_loss.item()
-        # log_dict['policy_loss'] = pg_loss.item()
-        # log_dict['entropy'] = entropy_loss.item()
-        # log_dict['old_approx_kl'] = old_approx_kl.item()
-        # log_dict['approx_kl'] =  approx_kl.item()
-        # log_dict['clipfrac'] = np.mean(clipfracs)
-        # log_dict['explained_variance'] = explained_var
-        # wandb.log(log_dict, step=iteration)
+        if iter % 10 == 0:
+            log_dict = {}
+            if iteration >= critic_warmup_iterations:
+                log_dict['actor_learning_rate'] = actor_optimizer.param_groups[0]["lr"]
+            log_dict['critic_learning_rate'] = critic_optimizer.param_groups[0]["lr"]
+            log_dict['value_loss'] = v_loss.item()
+            log_dict['policy_loss'] = pg_loss.item()
+            log_dict['entropy'] = entropy_loss.item()
+            log_dict['old_approx_kl'] = old_approx_kl.item()
+            log_dict['approx_kl'] =  approx_kl.item()
+            log_dict['clipfrac'] = np.mean(clipfracs)
+            log_dict['explained_variance'] = explained_var
+            wandb.log(log_dict, step=iteration)
 
 
         ### Log with tensorboard
-        if iteration % 500 == 0:
-            print("Logging at iteration: ", iteration)
-            writer.add_scalar('Loss/value_loss', v_loss.item(), iteration)
-            writer.add_scalar('Loss/policy_loss', pg_loss.item(), iteration)
-            writer.add_scalar('Loss/entropy', entropy_loss.item(), iteration)
-            if iteration >= critic_warmup_iterations:
-                writer.add_scalar('lr/actor_learning_rate', actor_optimizer.param_groups[0]["lr"], iteration)
-            writer.add_scalar('lr/critic_learning_rate',  critic_optimizer.param_groups[0]["lr"], iteration)
-            writer.add_scalar('old_approx_kl',  old_approx_kl.item(), iteration)
-            writer.add_scalar('approx_kl',  approx_kl.item(), iteration)
-            writer.add_scalar('clipfrac',  np.mean(clipfracs), iteration)
-            writer.add_scalar('explained_variance',  explained_var, iteration)
+        # if iteration % 500 == 0:
+        #     print("Logging at iteration: ", iteration)
+        #     writer.add_scalar('Loss/value_loss', v_loss.item(), iteration)
+        #     writer.add_scalar('Loss/policy_loss', pg_loss.item(), iteration)
+        #     writer.add_scalar('Loss/entropy', entropy_loss.item(), iteration)
+        #     if iteration >= critic_warmup_iterations:
+        #         writer.add_scalar('lr/actor_learning_rate', actor_optimizer.param_groups[0]["lr"], iteration)
+        #     writer.add_scalar('lr/critic_learning_rate',  critic_optimizer.param_groups[0]["lr"], iteration)
+        #     writer.add_scalar('old_approx_kl',  old_approx_kl.item(), iteration)
+        #     writer.add_scalar('approx_kl',  approx_kl.item(), iteration)
+        #     writer.add_scalar('clipfrac',  np.mean(clipfracs), iteration)
+        #     writer.add_scalar('explained_variance',  explained_var, iteration)
 
 
 
-        if iteration % 10_000 == 0:
+        if iteration % 100 == 0:
             print("Iteration: ", iteration)
             torch.save(
                 critic.state_dict(),

@@ -34,8 +34,9 @@ def ordereddict_to_tensordict(dict):
         'heat_map': torch.from_numpy(dict['heat_map']).float(),
         'goal_direction': torch.from_numpy(dict['goal_direction']).float(),
         'current_loc': torch.from_numpy(dict['current_loc']).float(),
-        'time_spent': torch.from_numpy(dict['time_spent']).float()
-    }, batch_size=[dict['heat_map'].shape[0]])
+        'time_spent': torch.from_numpy(dict['time_spent']).float(),
+        'risk_measure': torch.from_numpy(dict['risk_measure']).float()
+    }, batch_size=[dict['goal_direction'].shape[0]])
     return td
 
 class ReplayBufferSamples():
@@ -102,7 +103,8 @@ class ReplayBuffer:
             ),
             "goal_direction": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
             "current_loc": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
-            "time_spent":  MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32)
+            "time_spent":  MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
+            "risk_measure": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32)
         },
             batch_size=[batch_size],
             device=self._device,
@@ -116,7 +118,8 @@ class ReplayBuffer:
             ),
             "goal_direction": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
             "current_loc": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
-            "time_spent":  MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32)
+            "time_spent":  MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
+            "risk_measure": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32)
         },
             batch_size=[batch_size],
             device=self._device,
@@ -126,12 +129,14 @@ class ReplayBuffer:
             states_tensor[i] = TensorDict({"heat_map": states[i]['heat_map'], 
                                            "goal_direction": states[i]['goal_direction'] / self._scaling,
                                            "current_loc": states[i]['current_loc'] / (2.0*self._scaling),
-                                           "time_spent": states[i]['time_spent']}, [])
+                                           "time_spent": states[i]['time_spent'],
+                                           "risk_measure": states[i]['risk_measure']}, [])
             
             next_states_tensor[i] = TensorDict({"heat_map": next_states[i]['heat_map'], 
                                            "goal_direction": next_states[i]['goal_direction'] / self._scaling,
                                            "current_loc": states[i]['current_loc'] / (2.0*self._scaling),
-                                           "time_spent": states[i]['time_spent']}, [])
+                                           "time_spent": states[i]['time_spent'],
+                                            "risk_measure": states[i]['risk_measure']}, [])
 
         if self._action_normalized:
             if self._action_dim == 1:
@@ -274,7 +279,8 @@ def train(config):
     observation_space= gym.spaces.Dict({"heat_map": gym.spaces.Box(0, 255, observation_img_size), 
                         "goal_direction": gym.spaces.Box(-1, 1, shape=(2,)),
                         "current_loc": gym.spaces.Box(0, 1, shape=(2,)),
-                        "time_spent": gym.spaces.Box(-1, 1, shape=(2,))})
+                        "time_spent": gym.spaces.Box(-1, 1, shape=(2,)),
+                        "risk_measure": gym.spaces.Box(-1, 1, shape=(2,))})
 
 
     actor = Actor(observation_space, action_dim, action_max, action_min).to(device)
@@ -327,6 +333,8 @@ def train(config):
     map_config.goal_direction_normalized = config['env']['observation']['goal_direction_normalized']
     map_config.heat_map_normalized = config['env']['observation']['heat_map_normalized']
     map_config.radar_radius = config['env']['radar_radius']
+    map_config.interceptor_launch_time = config['env']['interceptor_launch_time']
+    map_config.interceptor_abort_time = config['env']['interceptor_abort_time']
 
     num_envs = config['train']['num_envs']
     envs = gym.vector.AsyncVectorEnv([

@@ -7,4 +7,4 @@ goal_tolerance: 25.0
 goal_reward: 500.0
 time_limit_penalty: -1000.0
 load_data_num: 1000  # How many trajectories to load.
-output_path:  /home/yixuany/workspace/CORL/finetune_data_sac_more_risk/ #/media/lucas/T7/Offline_rl_data/ # Where to store the processed data.
+output_path:  /home/yixuany/workspace/CORL/finetune_data_sac_risk_measure/ #/media/lucas/T7/Offline_rl_data/ # Where to store the processed data.

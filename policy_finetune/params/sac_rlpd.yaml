@@ -7,7 +7,7 @@ train:
   num_envs: 10
   batch_size: 64
   buffer_size: 36462 # 36462
-  data_path: /home/yixuany/workspace/CORL/finetune_data_sac/
+  data_path: /home/yixuany/workspace/CORL/finetune_data_sac_risk_measure/
   checkpoints_path: /home/yixuany/workspace/CORL/output
   device: cuda
   discount: 0.99
@@ -16,7 +16,6 @@ train:
   learning_starts: 500
   policy_frequency: 2
   target_network_frequency: 1
-  max_episode_length: 1024
   policy_lr: 0.0003  # Actor learning rate
   q_lr: 0.001
 
@@ -47,6 +46,8 @@ env:
   max_time_step: 500
   goal_tolerance: 25.0
   reward_normalization_factor: 100
+  interceptor_launch_time: 7
+  interceptor_abort_time: 3
   observation:
     heat_map_normalized: False
     goal_direction_normalized: True

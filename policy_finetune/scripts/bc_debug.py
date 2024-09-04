@@ -131,37 +131,50 @@ def wandb_init(config: dict) -> None:
     )
     wandb.run.save()
 
-    
-# class ActorNet(nn.Module):
-#     def __init__(self,
-#                  observation_space,
-#                  action_space,
-#                  hidden_sizes,
-#                  hidden_act=nn.ReLU):
-#         super().__init__()
-#         if not isinstance(hidden_sizes, list):
-#             raise TypeError('hidden_sizes should be a list')
-#         self.action_space = action_space
-#         action_dim = action_space.shape[0]
-#         self.feature_extractor = FeatureExtractor(observation_space)
-#         in_size = self.feature_extractor.features_dim
-#         mlp_extractor : List[nn.Module] = []
-#         for curr_layer_dim in hidden_sizes:
-#             mlp_extractor.append(nn.Linear(in_size, curr_layer_dim))
-#             mlp_extractor.append(hidden_act())
-#             in_size = curr_layer_dim
+LOG_STD_MIN = -20
+LOG_STD_MAX = 2
 
-#         self.latent_dim = in_size
-#         mlp_extractor.append(nn.Linear(self.latent_dim, action_dim))
-#         mlp_extractor.append(nn.Tanh())
-#         self.policy_net = nn.Sequential(*mlp_extractor)
+class Actor(nn.Module):
+    def __init__(self, observation_space, action_dim, action_max=1, action_min=-1, num_modes=2):
+        super().__init__()
+        self.feature_extractor = FeatureExtractor(observation_space)
+        in_size = self.feature_extractor.features_dim
+        self.fc1 = nn.Linear(in_size, 64)
+        self.fc2 = nn.Linear(64, 64)
+        self.fc_mean = nn.Linear(64, action_dim)
+        self.fc_logstd = nn.Linear(64, action_dim)
+        # action rescaling
+        self.register_buffer(
+            "action_scale", torch.tensor((action_max - action_min) / 2.0, dtype=torch.float32)
+        )
+        self.register_buffer(
+            "action_bias", torch.tensor((action_max + action_min) / 2.0, dtype=torch.float32)
+        )
 
+    def forward(self, observation):
+        x = self.feature_extractor(observation)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        mean = self.fc_mean(x)
+        log_std = self.fc_logstd(x)
+        log_std = torch.tanh(log_std)
+        log_std = LOG_STD_MIN + 0.5 * (LOG_STD_MAX - LOG_STD_MIN) * (log_std + 1)  # From SpinUp / Denis Yarats
 
-#     def forward(self, observations, deterministic=False):
-#         feature = self.feature_extractor(observations)
-#         actions = self.policy_net.forward(feature)
+        return mean, log_std
 
-#         return actions
+    def get_action(self, observation):
+        mean, log_std = self(observation)
+        std = log_std.exp()
+        normal = torch.distributions.Normal(mean, std)
+        x_t = normal.rsample()  # for reparameterization trick (mean + std * N(0,1))
+        y_t = torch.tanh(x_t)
+        action = y_t * self.action_scale + self.action_bias
+        log_prob = normal.log_prob(x_t)
+        # Enforcing Action Bound
+        log_prob -= torch.log(self.action_scale * (1 - y_t.pow(2)) + 1e-6)
+        log_prob = log_prob.sum(1, keepdim=True)
+        mean = torch.tanh(mean) * self.action_scale + self.action_bias
+        return action, log_prob, mean
     
 
 class BC:
