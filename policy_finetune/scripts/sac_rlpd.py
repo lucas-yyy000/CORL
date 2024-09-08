@@ -24,8 +24,8 @@ def wandb_init(config: dict) -> None:
     wandb.init(
         config=config,
         project=config['info']["project"],
-        name=config['info']["name"],
-        id=str(uuid.uuid4()),
+        name=config["name"],
+        id=config["id"],
     )
     wandb.run.save()
 
@@ -104,7 +104,7 @@ class ReplayBuffer:
             "goal_direction": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
             "current_loc": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
             "time_spent":  MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
-            "risk_measure": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32)
+            "risk_measure": MemoryMappedTensor.empty((len(states), 10), dtype=torch.float32)
         },
             batch_size=[batch_size],
             device=self._device,
@@ -119,7 +119,7 @@ class ReplayBuffer:
             "goal_direction": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
             "current_loc": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
             "time_spent":  MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
-            "risk_measure": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32)
+            "risk_measure": MemoryMappedTensor.empty((len(states), 10), dtype=torch.float32)
         },
             batch_size=[batch_size],
             device=self._device,
@@ -205,6 +205,7 @@ class Actor(nn.Module):
         super().__init__()
         self.feature_extractor = FeatureExtractor(observation_space)
         in_size = self.feature_extractor.features_dim
+        # print("Actor NN feature size: ", in_size)
         self.fc1 = nn.Linear(in_size, 64)
         self.fc2 = nn.Linear(64, 64)
         self.fc_mean = nn.Linear(64, action_dim)
@@ -249,9 +250,11 @@ def train(config):
     ##################################################################
     checkpoint_path = config['train']['checkpoints_path']
     print(f"Checkpoints path: ", checkpoint_path)
-    run_name = config['info']['name'] + '-' + str(uuid.uuid4())[:8]
+    id = str(uuid.uuid4())[:8]
+    run_name = config['info']['name'] + '-' + id
     os.makedirs(os.path.join(checkpoint_path, run_name), exist_ok=True)
     config['name'] = run_name
+    config['id'] = id
     print("Run name: ", run_name)
     with open(os.path.join(os.path.join(checkpoint_path, run_name), "config.yaml"), "w") as f:
         yaml.dump(config, f)
@@ -280,7 +283,8 @@ def train(config):
                         "goal_direction": gym.spaces.Box(-1, 1, shape=(2,)),
                         "current_loc": gym.spaces.Box(0, 1, shape=(2,)),
                         "time_spent": gym.spaces.Box(-1, 1, shape=(2,)),
-                        "risk_measure": gym.spaces.Box(-1, 1, shape=(2,))})
+                        "risk_measure": gym.spaces.Box(0, 1, shape=(config['env']['interceptor_launch_time'],))
+                        })
 
 
     actor = Actor(observation_space, action_dim, action_max, action_min).to(device)
@@ -317,7 +321,7 @@ def train(config):
     )
 
     ### Set up Gym Env
-    map_config = MapConfig
+    map_config = MapConfig()
     map_config.V = config['env']['V']
     map_config.action_dim = action_dim
     map_config.action_max = action_max
@@ -337,10 +341,8 @@ def train(config):
     map_config.interceptor_abort_time = config['env']['interceptor_abort_time']
 
     num_envs = config['train']['num_envs']
-    envs = gym.vector.AsyncVectorEnv([
-        lambda: RadarEnv(MapConfig(), 'cuda')
-        for _ in range(num_envs)
-    ])
+    envs_list = [lambda: RadarEnv(map_config, 'cuda')] * num_envs
+    envs = gym.vector.AsyncVectorEnv(envs_list)
     # print("Envs: ", envs.observation_space)
     # TRY NOT TO MODIFY: start the game
     obs = envs.reset()

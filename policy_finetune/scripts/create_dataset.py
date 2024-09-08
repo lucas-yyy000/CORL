@@ -1,7 +1,9 @@
 import numpy as np
-from utils import *
+from policy_finetune.scripts.utils import *
 import statistics
 import yaml
+from policy_finetune.scripts.simulate_detection import DetectionSimulator
+from evasion_guidance.scripts.evasion_risk import EvasionRisk
 
 data_config_path = "/home/yixuany/workspace/evasion_nonlinear_guidance/evasion_guidance/data/config.yml"
 with open(data_config_path,"r") as file_object:
@@ -18,6 +20,7 @@ V = data_config['planner']['V']
 L1 = data_config['planner']['L1']
 time_interval = data_config['planner']['delta_t']
 risk_interval = data_config['planner']['risk_buffer_length']
+
 with open("/home/yixuany/workspace/CORL/policy_finetune/params/offline_data_config.yaml","r") as file_object:
     offline_data_config = yaml.load(file_object,Loader=yaml.SafeLoader)
 
@@ -30,15 +33,27 @@ time_max = offline_data_config['env']['max_time_step']
 observation_img_size = [1, img_size, img_size]
 goal_tolerance = offline_data_config['goal_tolerance']
 time_scaling = offline_data_config['env']['time_scaling']
+interceptor_launch_time = offline_data_config['env']['interceptor_launch_time']
+interceptor_abort_time = offline_data_config['env']['interceptor_abort_time']
 
+def out_of_bound(loc):
+    x = loc[0]
+    y = loc[1]
+    out_of_bound = bool(
+                x < -100.0
+                or x > 1.2*map_range
+                or y < -100.0
+                or y > 1.2*map_range
+            )
+    return out_of_bound
 def generate_episode_data(data):
-    init_state = data['start_state']
+    # init_state = data['start_state']
     goal_location = data['goal_location']
     radar_locs = data['radar_locations']
-    radar_orientations = data['radar_orientations']
+    # radar_orientations = data['radar_orientations']
     path = data['state_history']
     inputs = data['input_history']
-    risks = data['risk_history']
+    # risks = data['risk_history']
 
     #############################################################
     ###       Print some stats about the collected data       ###
@@ -64,10 +79,14 @@ def generate_episode_data(data):
     terminations = []
     truncations = []
     sars_data = []
-    risk_measure = np.zeros(risk_interval)
+    risk_measure = np.zeros(interceptor_launch_time)
     prev_goal_dir = None
+    risk_evaluator = EvasionRisk(radar_locs, risk_interval, radar_radius)
+    interceptor_simulator = DetectionSimulator(radar_locs, radar_radius, interceptor_launch_time, interceptor_abort_time)
     for i in range(len(path)-1):
-        risk_measure[i % risk_interval] = risks[i]
+        risk = risk_evaluator.evalute_risk(path[i], inputs[i])
+        risk_measure = np.roll(risk_measure, -1)
+        risk_measure[-1] = risk
         
         heat_map = get_radar_heat_map(path[i], radar_locs, img_size, 
                                  aircraft_detection_range, grid_size)
@@ -76,7 +95,8 @@ def generate_episode_data(data):
                             'goal_direction': goal_dir,
                             'current_loc': path[i][:2],
                             'time_spent': np.array([np.cos(i / time_max), np.sin(i / time_max)]),
-                            'risk_measure':  np.array([np.mean(risk_measure), np.max(risk_measure)])})
+                            'risk_measure':  risk_measure
+                            })
         
         heat_map_next = get_radar_heat_map(path[i+1], radar_locs, img_size, 
                                  aircraft_detection_range, grid_size)
@@ -85,10 +105,12 @@ def generate_episode_data(data):
                             'goal_direction': center_state(path[i+1], goal_location),
                             'current_loc': path[i+1][:2],
                             'time_spent': np.array([np.cos(i / time_max), np.sin(i / time_max)]),
-                            'risk_measure':  np.array([np.mean(risk_measure), np.max(risk_measure)])})
+                            'risk_measure':  risk_measure
+                            })
         
         actions.append(inputs[i])
         dist_to_goal = np.linalg.norm(goal_location - path[i][:2])
+        shutdown = interceptor_simulator.update_shutdown(path[i], inputs[i])
         if i >= time_max and dist_to_goal > goal_tolerance:
             rewards.append(offline_data_config['time_limit_penalty'])
             truncations.append(False)
@@ -100,20 +122,28 @@ def generate_episode_data(data):
             terminations.append(True)
             print("Breaking...")
             break
+        elif i < time_max and shutdown:
+            rewards.append(offline_data_config['shutdown_penalty'])
+            truncations.append(False)
+            terminations.append(True)
+            print("Shutdown at step: ", i)
+            break
+        elif i < time_max and out_of_bound(path[i]):
+            rewards.append(offline_data_config['out_of_bound_penalty'])
+            truncations.append(False)
+            terminations.append(True)
+            print("Out of bound at step: ", i)
+            break
         elif i < time_max and dist_to_goal > goal_tolerance:
-            reward = -risks[i]
+            reward = -risk
             rewards.append(reward)
             truncations.append(False)
             terminations.append(False)
             prev_goal_dir = goal_dir
         else:
             ### This part shouldn't be called.
-            print("Weird call...")
-            rewards.append(-np.inf)
-            truncations.append(False)
-            terminations.append(True)
-            break
-        
+            raise Exception("Weird call...")
+
     # print(len(observations))
     # print(len(actions))
     # print(len(rewards))
