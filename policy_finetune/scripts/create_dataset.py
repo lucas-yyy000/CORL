@@ -83,11 +83,7 @@ def generate_episode_data(data):
     prev_goal_dir = None
     risk_evaluator = EvasionRisk(radar_locs, risk_interval, radar_radius)
     interceptor_simulator = DetectionSimulator(radar_locs, radar_radius, interceptor_launch_time, interceptor_abort_time)
-    for i in range(len(path)-1):
-        risk = risk_evaluator.evalute_risk(path[i], inputs[i])
-        risk_measure = np.roll(risk_measure, -1)
-        risk_measure[-1] = risk
-        
+    for i in range(len(path)-1):        
         heat_map = get_radar_heat_map(path[i], radar_locs, img_size, 
                                  aircraft_detection_range, grid_size)
         goal_dir = center_state(path[i], goal_location)
@@ -109,6 +105,9 @@ def generate_episode_data(data):
                             })
         
         actions.append(inputs[i])
+        risk = risk_evaluator.evalute_risk(path[i], inputs[i])
+        risk_measure = np.roll(risk_measure, -1)
+        risk_measure[-1] = risk
         dist_to_goal = np.linalg.norm(goal_location - path[i][:2])
         shutdown = interceptor_simulator.update_shutdown(path[i], inputs[i])
         if i >= time_max and dist_to_goal > goal_tolerance:
@@ -135,7 +134,7 @@ def generate_episode_data(data):
             print("Out of bound at step: ", i)
             break
         elif i < time_max and dist_to_goal > goal_tolerance:
-            reward = -risk
+            reward = 1.0 - risk
             rewards.append(reward)
             truncations.append(False)
             terminations.append(False)
