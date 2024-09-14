@@ -1,14 +1,14 @@
 env:
   img_size: 100
   aircraft_detection_range: 100
-  max_time_step: 300
+  max_time_step: 150
   time_scaling: 25
   interceptor_launch_time: 10
   interceptor_abort_time: 3
 goal_tolerance: 25.0
 goal_reward: 500.0
 time_limit_penalty: -500.0
-shutdown_penalty: -1000
-out_of_bound_penalty: -500
+shutdown_penalty: -10
+out_of_bound_penalty: -1000
 load_data_num: 1000  # How many trajectories to load.
 output_path:  /home/yixuany/workspace/CORL/finetune_data_sac_risk_measure/ #/media/lucas/T7/Offline_rl_data/ # Where to store the processed data.

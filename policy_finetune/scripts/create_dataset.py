@@ -36,16 +36,17 @@ time_scaling = offline_data_config['env']['time_scaling']
 interceptor_launch_time = offline_data_config['env']['interceptor_launch_time']
 interceptor_abort_time = offline_data_config['env']['interceptor_abort_time']
 
-def out_of_bound(loc):
+def out_of_bound(loc, eps=50.0):
     x = loc[0]
     y = loc[1]
     out_of_bound = bool(
-                x < -100.0
-                or x > 1.2*map_range
-                or y < -100.0
-                or y > 1.2*map_range
+                x < 0.0 - eps
+                or x > map_range + eps
+                or y < 0.0 - eps
+                or y > map_range + eps
             )
     return out_of_bound
+
 def generate_episode_data(data):
     # init_state = data['start_state']
     goal_location = data['goal_location']
@@ -59,7 +60,7 @@ def generate_episode_data(data):
     ###       Print some stats about the collected data       ###
     #############################################################
 
-    # print("Episode length: ", len(path))
+    print("Episode length: ", len(path))
     # print("Risks stats: ", "Min: ", min(risks), "Max: ", max(risks), 
     #       "Mean: ", statistics.mean(risks), 
     #       "Median: ", statistics.median(risks),
@@ -124,9 +125,9 @@ def generate_episode_data(data):
         elif i < time_max and shutdown:
             rewards.append(offline_data_config['shutdown_penalty'])
             truncations.append(False)
-            terminations.append(True)
+            terminations.append(False)
             print("Shutdown at step: ", i)
-            break
+            # break
         elif i < time_max and out_of_bound(path[i]):
             rewards.append(offline_data_config['out_of_bound_penalty'])
             truncations.append(False)

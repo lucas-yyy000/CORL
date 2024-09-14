@@ -6,7 +6,7 @@ info:
 train:
   num_envs: 10
   batch_size: 64
-  buffer_size: 35322 # 35322
+  buffer_size: 36212 # 36212
   data_path: /home/yixuany/workspace/CORL/finetune_data_sac_risk_measure/
   checkpoints_path: /home/yixuany/workspace/CORL/output
   device: cuda
