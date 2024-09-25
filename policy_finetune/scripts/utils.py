@@ -27,10 +27,10 @@ def generate_radar_config(num_radar_min, num_radar_max, separation_radius=30.0, 
 
     return radar_locs, radar_orientations
 
-def visualiza_radar_config(radar_locs, radar_orientations, radius=30, xlim=None, ylim=None):
+def visualiza_radar_config(radar_locs, radius=30, xlim=None, ylim=None):
     plt.scatter(radar_locs[:, 0], radar_locs[:, 1])
     for i in range(radar_locs.shape[0]):
-        plt.arrow(radar_locs[i, 0], radar_locs[i, 1], 10*np.cos(radar_orientations[i]), 10*np.sin(radar_orientations[i]))
+        # plt.arrow(radar_locs[i, 0], radar_locs[i, 1], 10*np.cos(radar_orientations[i]), 10*np.sin(radar_orientations[i]))
         plt.scatter([radar_locs[i, 0] + radius*np.cos(theta) for theta in np.linspace(0, np.pi*2)], [radar_locs[i, 1] + radius*np.sin(theta) for theta in np.linspace(0, np.pi*2)], s=0.5)
     
     if not xlim is None:

@@ -18,7 +18,10 @@ import yaml
 import pickle
 from policy_finetune.scripts.actor_utils import FeatureExtractor
 from tensordict import MemoryMappedTensor, TensorDict
+import gym_env
 from gym_env.env.radar_env import RadarEnv, MapConfig
+import shutil
+import pathlib
 
 def wandb_init(config: dict) -> None:
     wandb.init(
@@ -34,8 +37,7 @@ def ordereddict_to_tensordict(dict):
         'heat_map': torch.from_numpy(dict['heat_map']).float(),
         'goal_direction': torch.from_numpy(dict['goal_direction']).float(),
         'current_loc': torch.from_numpy(dict['current_loc']).float(),
-        'time_spent': torch.from_numpy(dict['time_spent']).float(),
-        'risk_measure': torch.from_numpy(dict['risk_measure']).float()
+        'time_spent': torch.from_numpy(dict['time_spent']).float()
     }, batch_size=[dict['goal_direction'].shape[0]])
     return td
 
@@ -64,7 +66,7 @@ class ReplayBuffer:
 
         self._buffer_size = buffer_size
         self._new_data_idx = buffer_size
-        self._max_buffer_size = 1_000_000
+        self._max_buffer_size = 300_000
         self._demonstration_size = buffer_size
 
         self._device = device
@@ -103,8 +105,7 @@ class ReplayBuffer:
             ),
             "goal_direction": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
             "current_loc": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
-            "time_spent":  MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
-            "risk_measure": MemoryMappedTensor.empty((len(states), 10), dtype=torch.float32)
+            "time_spent":  MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32)
         },
             batch_size=[batch_size],
             device=self._device,
@@ -118,8 +119,7 @@ class ReplayBuffer:
             ),
             "goal_direction": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
             "current_loc": MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
-            "time_spent":  MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32),
-            "risk_measure": MemoryMappedTensor.empty((len(states), 10), dtype=torch.float32)
+            "time_spent":  MemoryMappedTensor.empty((len(states), 2), dtype=torch.float32)
         },
             batch_size=[batch_size],
             device=self._device,
@@ -129,14 +129,12 @@ class ReplayBuffer:
             states_tensor[i] = TensorDict({"heat_map": states[i]['heat_map'], 
                                            "goal_direction": states[i]['goal_direction'] / self._scaling,
                                            "current_loc": states[i]['current_loc'] / (2.0*self._scaling),
-                                           "time_spent": states[i]['time_spent'],
-                                           "risk_measure": states[i]['risk_measure']}, [])
+                                           "time_spent": states[i]['time_spent']}, [])
             
             next_states_tensor[i] = TensorDict({"heat_map": next_states[i]['heat_map'], 
                                            "goal_direction": next_states[i]['goal_direction'] / self._scaling,
                                            "current_loc": states[i]['current_loc'] / (2.0*self._scaling),
-                                           "time_spent": states[i]['time_spent'],
-                                            "risk_measure": states[i]['risk_measure']}, [])
+                                           "time_spent": states[i]['time_spent']}, [])
 
         if self._action_normalized:
             if self._action_dim == 1:
@@ -259,6 +257,11 @@ def train(config):
     with open(os.path.join(os.path.join(checkpoint_path, run_name), "config.yaml"), "w") as f:
         yaml.dump(config, f)
 
+    ### Saving this file and the gym env for reproducibility.
+    print("Saving settings...")
+    shutil.copy(os.path.(__file__), os.path.join(checkpoint_path, run_name))
+    shutil.copy(os.path.abspath(gym_env.env.radar_env.__file__), os.path.join(checkpoint_path, run_name))
+    
     #######################################
     ###      Set up Environment    ###
     #######################################
@@ -282,8 +285,7 @@ def train(config):
     observation_space= gym.spaces.Dict({"heat_map": gym.spaces.Box(0, 255, observation_img_size), 
                         "goal_direction": gym.spaces.Box(-1, 1, shape=(2,)),
                         "current_loc": gym.spaces.Box(0, 1, shape=(2,)),
-                        "time_spent": gym.spaces.Box(-1, 1, shape=(2,)),
-                        "risk_measure": gym.spaces.Box(0, 1, shape=(config['env']['interceptor_launch_time'],))
+                        "time_spent": gym.spaces.Box(-1, 1, shape=(2,))
                         })
 
 

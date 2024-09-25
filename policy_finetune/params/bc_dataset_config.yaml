@@ -1,0 +1,7 @@
+env:
+  img_size: 100
+  radar_radius: 100
+  aircraft_detection_range: 100
+
+load_data_num: 1000  # How many trajectories to load.
+output_path:  /home/yixuany/workspace/CORL/bc_data_fixed_radar_model/ #/media/lucas/T7/Offline_rl_data/ # Where to store the processed data.

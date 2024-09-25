@@ -15,9 +15,11 @@ import wandb
 import argparse
 import yaml
 import pickle
+import actor_utils
 from actor_utils import FeatureExtractor, ActorNet
 from tensordict import MemoryMappedTensor, TensorDict
-
+import shutil
+import pathlib
 TensorBatch = List[torch.Tensor]
 
 class ReplayBuffer:
@@ -253,6 +255,11 @@ def train(config):
     config['name'] = run_name
     with open(os.path.join(os.path.join(checkpoint_path, run_name), "config.yaml"), "w") as f:
         yaml.dump(config, f)
+
+    ### Saving this file and the gym env for reproducibility.
+    print("Saving settings...")
+    shutil.copy(os.path.(__file__), os.path.join(checkpoint_path, run_name))
+    shutil.copy(os.path.abspath(actor_utils.__file__), os.path.join(checkpoint_path, run_name))
 
     # Set environment parameters.
     img_size = config['env']['img_size']
